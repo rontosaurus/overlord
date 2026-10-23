@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# drift <kind> <initiative|-> "<message>"  — append one line to agents/state/drift.log
+# kinds: routing-bypass | waived-F | attestation-fail | hook-block:<gate> | hook-ask:<gate> | gate-skipped | classifier-deny | rotation-failed | other
+set -u
+f="${AGENTS_REPO:?set AGENTS_REPO}/agents/state/drift.log"
+[ $# -ge 3 ] || { echo "usage: drift <kind> <initiative|-> <message>" >&2; exit 1; }
+printf '%s | %s | %s | %s\n' "$(date -Is)" "$1" "$2" "$3" >> "$f" && tail -1 "$f"

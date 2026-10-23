@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""rehydrate — the overlord's wake view of agents/state/overlord.md. Zero model tokens, <= 6000 bytes, stdlib only.
+
+  rehydrate [--state DIR] [--file overlord.md] [--budget 6000]
+
+Prints: the Last wake line; alarms; Open initiatives (`id · status`, status cut at 300 chars); open Ask-the-owner rows
+(`#N · opened · what cut at 200 · staged where`); the first 8 Watching bullets cut at 200; and a closing
+`(N more; read agents/state/overlord.md)`. If the view would exceed the budget the cuts shrink (initiative status
+first, then asks, then watching count) — the budget wins, the "N more" line says what was dropped.
+Tables are read by header name (Id / Status / Go ...), so extra columns are fine.
+
+Alarms:
+  OVER CAP <file> <bytes>   a file over its `size_caps` entry in agents/state/ceiling.json (fix: archive-state --apply)
+  WIP <n> initiatives / <m> asks   when > wip_initiatives (5) / ask_backpressure (4) in ceiling.json
+  ORPHAN <id>   an initiative row whose status cell has NO next-step word (heuristic: none of next|owed|check|wait(s|ing)|
+                pending|verify|apply|run|review|deploy|re-?test|go|ask|needs?|to do|todo|stage[sd]?|will|until|before|after)
+                — a row that only says MERGED/DONE with nothing to do belongs in Recently closed. Best effort.
+  PRIORITIES/NEXT STALE · WEEKLY CHECK-IN DUE · SPEC DEAD/STALE/ORPHAN   from `agents/bin/strategist alarms` (live state only)
+  STALE <id>    an initiative row whose line was neither added nor removed in the last 14 days of the file's git history
+                (one `git log -p -U0 --since=14.days`; skipped silently outside a git work tree).
+"""
+import glob, json, os, re, subprocess, sys
+import datetime as dt
+from pathlib import Path
+
+SELF = Path(os.environ.get("AGENTS_REPO") or Path(__file__).resolve().parents[2])
+NEXT = re.compile(r"\b(next|owed?|check|waits?|waiting|pending|verify|apply|run|review|deploy|re-?test|go|ask|needs?|to do|todo|stage[sd]?|will|until|before|after)\b", re.I)
+
+
+def cells(row):
+    s = row.strip().strip("|").replace("\\|", "\x00")
+    return [c.strip().replace("\x00", "|") for c in s.split("|")]
+
+
+def cut(s, n):
+    s = re.sub(r"\s+", " ", re.sub(r"[*`]", "", s)).strip()
+    return s if len(s) <= n else s[: n - 1].rstrip() + "…"
+
+
+def sections(text):
+    out, cur = {}, None
+    for l in text.split("\n"):
+        if l.startswith("## "):
+            cur = next((n for n in ("Open initiatives", "Recently closed", "Ask", "Watching", "Last wake") if l[3:].lower().startswith(n.lower())), l[3:])
+            out[cur] = []
+        elif cur:
+            out[cur].append(l)
+    return out
+
+
+def table_rows(lines, want):
+    """(rows, header) of the first table; rows = [(dict header->cell, line)] skipping empty/placeholder rows.
+    `want` is a column name that must be non-empty for a row to count (e.g. "id", "#")."""
+    rows, hdr = [], None
+    for l in lines:
+        if l.startswith("|") and not re.match(r"^\|[\s:|-]+\|?\s*$", l):
+            c = cells(l)
+            if hdr is None:
+                hdr = [h.lower() for h in c]
+                continue
+            if len(c) == len(hdr):
+                d = dict(zip(hdr, c))
+                if d.get(want, "").strip():
+                    rows.append((d, l))
+    return rows, hdr or []
+
+
+def first_key(d, *names):
+    for n in names:
+        for k in d:
+            if k == n or k.startswith(n):
+                return d[k]
+    return ""
+
+
+def touched_lines(path, days=14):
+    """Set of row-id prefixes added/removed in the last `days` days of the file's history; None if not available."""
+    try:
+        r = subprocess.run(["git", "-C", str(path.parent), "log", "-p", "-U0", f"--since={days}.days", "--format=", "--", path.name],
+                           capture_output=True, text=True, timeout=5)
+        if r.returncode != 0: return None
+        return {m.group(1).strip() for m in re.finditer(r"^[+-]\|\s*([^|]+?)\s*\|", r.stdout, re.M)}
+    except Exception:
+        return None
+
+
+def caps_alarms():
+    out = []
+    try:
+        cfg = json.loads((SELF / "agents/state/ceiling.json").read_text())
+    except Exception:
+        return out, {}
+    caps = cfg.get("size_caps", {})
+    for pat, cap in (caps.items() if isinstance(caps, dict) else []):
+        # a glob must stay inside the repo: no absolute path, no ".." (os.path.getsize would otherwise probe anywhere)
+        if not isinstance(pat, str) or os.path.isabs(pat) or pat.startswith(("/", "\\", "~")) or ".." in pat.replace("\\", "/").split("/") \
+           or not isinstance(cap, (int, float)) or isinstance(cap, bool):
+            out.append(f"IGNORED size_caps entry {pat!r}: must be a relative path inside the repo, no '..'")
+            continue
+        for f in sorted(glob.glob(str(SELF / pat))):
+            if not os.path.realpath(f).startswith(os.path.realpath(SELF) + os.sep): continue
+            n = os.path.getsize(f)
+            if n > cap: out.append(f"OVER CAP {os.path.relpath(f, SELF)} {n} (cap {cap})")
+    return out, cfg
+
+
+def strategist_alarms(state):
+    """The strategist's alarms (PRIORITIES/NEXT STALE, WEEKLY CHECK-IN DUE, SPEC DEAD/STALE/ORPHAN): one best-effort call,
+    only for the live state dir (a --state fixture gets none). Never raises."""
+    try:
+        exe = SELF / "agents/bin/strategist"
+        if Path(state).resolve() != (SELF / "agents/state").resolve() or not os.access(exe, os.X_OK): return []
+        r = subprocess.run([str(exe), "alarms", "--repo", str(SELF)], capture_output=True, text=True, timeout=8)
+        return [l for l in r.stdout.splitlines() if l.strip()] if r.returncode == 0 else []
+    except Exception:
+        return []
+
+
+def build(args):
+    def opt(k, d): return args[args.index(k) + 1] if k in args else d
+    state = Path(opt("--state", SELF / "agents/state"))
+    path = state / opt("--file", "overlord.md")
+    text = path.read_text(encoding="utf-8")
+    budget = int(opt("--budget", 6000))
+    secs = sections(text)
+    wake = next((l for l in text.split("\n") if l.startswith("Last wake:")), None)
+    if wake is None:
+        wake = "Last wake: " + next((l for l in secs.get("Last wake", []) if l.strip()), "(none)")
+    inits, _ = table_rows(secs.get("Open initiatives", []), "id")
+    asks, _ = table_rows(secs.get("Ask", []), "#")
+    asks = [(d, l) for d, l in asks if d["#"].strip().isdigit()]
+    watch = []
+    for l in secs.get("Watching", []):
+        if l.startswith("- "): watch.append(l[2:])
+    alarms, cfg = caps_alarms()
+    if len(inits) > cfg.get("wip_initiatives", 5) or len(asks) > cfg.get("ask_backpressure", 4): alarms.append(f"WIP {len(inits)} initiatives / {len(asks)} asks")
+    touched = touched_lines(path)
+    orphans, stale = [], []
+    for c, _ in inits:
+        iid = re.sub(r"[*`]", "", c["id"]).strip()
+        if not NEXT.search(first_key(c, "status")): orphans.append(iid)
+        if touched is not None and iid not in touched: stale.append(iid)
+    alarms += strategist_alarms(state)
+    if orphans: alarms.append("ORPHAN " + ", ".join(orphans))
+    if stale: alarms.append("STALE " + ", ".join(stale))
+
+    def render(ic, ac, wn, wc):
+        o = [cut(wake, 400), ""]
+        if alarms:
+            o += ["ALARMS"] + ["  " + cut(a, 380) for a in alarms] + [""]
+        o.append(f"OPEN INITIATIVES ({len(inits)})")
+        o += [f"  {cut(c['id'], 40)} · {cut(first_key(c, 'status'), ic)}" for c, _ in inits]
+        o += ["", f"OPEN ASKS ({len(asks)})"]
+        o += [f"  #{c['#']} · {cut(first_key(c, 'opened', 'asked'), 20)} · {cut(first_key(c, 'action', 'what'), ac)} · {cut(first_key(c, 'staged'), 60)}" for c, _ in asks]
+        o += ["", f"WATCHING (first {min(wn, len(watch))} of {len(watch)})"]
+        o += [f"  - {cut(w, wc)}" for w in watch[:wn]]
+        return o
+
+    ic, ac, wn, wc = 300, 200, 8, 200
+    while True:
+        o = render(ic, ac, wn, wc)
+        more = max(0, len(watch) - wn)
+        o += ["", f"({more} more; read agents/state/overlord.md)"]
+        txt = "\n".join(o) + "\n"
+        if len(txt.encode()) <= budget: return txt
+        if ic > 90: ic -= 20
+        elif ac > 80: ac -= 20
+        elif wn > 3: wn -= 1
+        elif wc > 80: wc -= 20
+        else:
+            return txt.encode()[:budget].decode("utf-8", "ignore")
+
+
+if __name__ == "__main__":
+    if "-h" in sys.argv or "--help" in sys.argv: print(__doc__); sys.exit(0)
+    sys.stdout.write(build(sys.argv[1:]))

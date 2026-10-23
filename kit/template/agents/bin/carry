@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# carry - audit rotations: every `rotate` row of agents/state/carry/closed.tsv from the last 7 days must have
+# its carry file written (file mtime, or a commit that touched it) within 15 minutes before the close row
+# (2 minutes after is tolerated). Otherwise it prints "CARRY MISSING ...". Evidence for the review session,
+# never a gate: always exits 0. bash + coreutils (+ git if the repo is one).
+#
+#   carry [--root DIR] [--days N]     DIR defaults to $AGENTS_REPO
+set -u
+root="${AGENTS_REPO:-}"; days=7
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --root) root="${2:-}"; shift 2 ;;
+    --days) days="${2:-7}"; shift 2 ;;
+    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    *) echo "usage: carry [--root DIR] [--days N]" >&2; exit 2 ;;
+  esac
+done
+case "$days" in ''|*[!0-9]*) days=7 ;; esac
+[ -n "$root" ] || { echo "carry: set AGENTS_REPO or pass --root" >&2; exit 2; }
+cl="$root/agents/state/carry/closed.tsv"
+[ -f "$cl" ] || { echo "carry: 0 rotation(s) in the last $days days, 0 missing"; exit 0; }
+now=$(date +%s); checked=0; missing=0
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
+while IFS=$'\t' read -r ts kind role sid path title || [ -n "$ts" ]; do
+  [ "$ts" = ts ] && continue
+  [ "$kind" = rotate ] || continue
+  t=$(date -d "$ts" +%s 2>/dev/null) || continue
+  [ $(( now - t )) -le $(( days * 86400 )) ] || continue
+  checked=$((checked+1))
+  ok=0
+  case "$path" in ''|-|/*|*..*) path="" ;; esac
+  if [ -n "$path" ] && [ -f "$root/$path" ]; then
+    times="$(mtime "$root/$path")"
+    [ -d "$root/.git" ] && times="$times $(git -C "$root" log --format=%ct -- "$path" 2>/dev/null)"
+    for x in $times; do
+      [ "$x" -ge $(( t - 900 )) ] 2>/dev/null && [ "$x" -le $(( t + 120 )) ] 2>/dev/null && ok=1
+    done
+  fi
+  if [ "$ok" = 0 ]; then
+    missing=$((missing+1)); printf 'CARRY MISSING  %s  %s %s  %s  %s\n' "${ts:0:16}" "$role" "${sid:0:8}" "$path" "$title"
+  fi
+done < "$cl"
+echo "carry: $checked rotation(s) in the last $days days, $missing missing"
+exit 0

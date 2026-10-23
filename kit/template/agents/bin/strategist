@@ -1,0 +1,522 @@
+#!/usr/bin/env python3
+"""strategist — the mechanical half of the strategist procedure (agents/prompts/strategist.md). Stdlib only; each
+subcommand is <= 5 s; the only file it ever writes is agents/state/arc.md (`arc --write`) — nothing else.
+
+  strategist [--repo PATH] [--now ISO] arc [--write]   per-spec table (status · owner · initiatives · last moved · alarms)
+  strategist [--repo PATH] [--now ISO] lint            shapes of arc/priorities/next/threads; one line per violation, exit 1
+  strategist [--repo PATH] [--now ISO] alarms          one line per alarm, exit 0 always (rehydrate prints these)
+
+--repo is the state root (default: $AGENTS_REPO, else the clone this script lives in); --now is a test clock (ISO, in the
+configured timezone when naive). Config: agents/state/strategist.json (timezone, weekly_first, weekly_dow, weekly_hour, outside).
+Specs are roadmap/specs/NN-name.md with a `Status:` line near the top and a `## Log` section of dated bullets.
+Alarms: SPEC DEAD (no dated Log line and no activity.tsv row naming the spec for 30 d) · SPEC STALE (Status: line
+unchanged in git for 14 d, ONE `git log -p` call) · SPEC ORPHAN (an open overlord.md row / Watching bullet on the spec with
+no owner word and no next-step word — rehydrate's NEXT regex) · PRIORITIES STALE <n>d (5) · NEXT STALE <n>d (3) ·
+WEEKLY CHECK-IN DUE <date> (the latest weekly hour on/after strategist.json "weekly_first" has no filled `## Decided` in
+brief/<date>-weekly.md; empty weekly_first = off).
+"""
+import datetime as dt, glob, importlib.machinery, importlib.util, json, os, re, subprocess, sys
+from pathlib import Path
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None
+
+TZ = dt.timezone.utc  # replaced in main() from strategist.json "timezone"
+SELF = Path(os.environ.get("AGENTS_REPO") or Path(__file__).resolve().parents[2])
+SLOTS = ("tap", "reply", "at-pc", "evening", "decide")
+TAGS = ("world", "owner", "local", "vendor")
+DEAD_DAYS, STALE_DAYS, PRI_DAYS, NEXT_DAYS = 30, 14, 5, 3
+OWNER_WORD = re.compile(r"\b(owner|framework|waiting-on|overseer|overlord|overmind|tick|worker)\b", re.I)
+NEXT_FALLBACK = re.compile(r"\b(next|owed?|check|waits?|waiting|pending|verify|apply|run|review|deploy|re-?test|go|ask|needs?|to do|todo|stage[sd]?|will|until|before|after)\b", re.I)
+
+
+def _next_re():
+    """rehydrate's next-step heuristic, imported (never forked); the literal copy above is the fallback."""
+    try:
+        p = str(Path(__file__).resolve().with_name("rehydrate"))
+        ld = importlib.machinery.SourceFileLoader("rehydrate_mod", p)
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("rehydrate_mod", ld))
+        ld.exec_module(m)
+        return m.NEXT
+    except Exception:
+        return NEXT_FALLBACK
+
+
+NEXT = _next_re()
+
+
+# ---------- config ----------
+def load_cfg(repo):
+    try:
+        return json.loads((Path(repo) / "agents/state/strategist.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def set_tz(name):
+    global TZ
+    try:
+        TZ = ZoneInfo(name) if (ZoneInfo and name and name.upper() != "UTC") else dt.timezone.utc
+    except Exception:
+        TZ = dt.timezone.utc
+
+
+def tzlabel(d):
+    return d.astimezone(TZ).strftime("%Z") or "UTC"
+
+
+# ---------- small helpers ----------
+def plain(s):
+    return re.sub(r"\s+", " ", re.sub(r"[*`]", "", s)).strip()
+
+
+def cut(s, n):
+    s = plain(s)
+    return s if len(s) <= n else s[: n - 1].rstrip() + "…"
+
+
+def cell(s):
+    return s.replace("|", "/").replace("\n", " ")
+
+
+def split_row(l):
+    s = l.strip().strip("|").replace("\\|", "\x00")
+    return [c.strip().replace("\x00", "|") for c in s.split("|")]
+
+
+def table(lines):
+    """[(lineno, header, [(lineno, cells)])] for the first markdown table in `lines` ((n, text) pairs)."""
+    rows = [(n, l) for n, l in lines if l.lstrip().startswith("|")]
+    if len(rows) < 2:
+        return None
+    header = [c.lower() for c in split_row(rows[0][1])]
+    body = [(n, split_row(l)) for n, l in rows[2:]]
+    return rows[0][0], header, body
+
+
+def sections(text):
+    """{title: [(lineno, line)]} split on '## ' (title kept as written); preamble under ''."""
+    out, cur = {"": []}, ""
+    for i, l in enumerate(text.split("\n"), 1):
+        if l.startswith("## "):
+            cur = l[3:].strip()
+            out[cur] = []
+        else:
+            out[cur].append((i, l))
+    return out
+
+
+def read(p):
+    try:
+        return Path(p).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def parse_ts(s, tz=None):
+    tz = tz or TZ
+    m = re.search(r"(\d{4}-\d{2}-\d{2})(?:[ T]+(\d{1,2}):(\d{2}))?", s or "")
+    if not m:
+        return None
+    d = dt.datetime.strptime(m.group(1), "%Y-%m-%d")
+    if m.group(2):
+        d = d.replace(hour=int(m.group(2)), minute=int(m.group(3)))
+    return d.replace(tzinfo=tz)
+
+
+def now_local(a):
+    if a.now:
+        n = dt.datetime.fromisoformat(a.now)
+        return n if n.tzinfo else n.replace(tzinfo=TZ)
+    return dt.datetime.now(TZ)
+
+
+def git(repo, *args, timeout=5):
+    try:
+        r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=timeout)
+        return r.stdout if r.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def file_age_days(repo, rel, now):
+    """Age in whole days of a state file: the newest of its last git commit and its line-1 stamp; None if neither."""
+    stamps = []
+    out = git(repo, "log", "-1", "--format=%cI", "--", rel)
+    if out and out.strip():
+        try:
+            stamps.append(dt.datetime.fromisoformat(out.strip()))
+        except ValueError:
+            pass
+    txt = read(Path(repo) / rel)
+    if txt:
+        t = parse_ts(txt.split("\n", 1)[0])
+        if t:
+            stamps.append(t)
+    return None if not stamps else max(0, (now - max(stamps)).days)
+
+
+# ---------- arc ----------
+def spec_files(repo):
+    return sorted(glob.glob(str(Path(repo) / "roadmap/specs/*.md")))
+
+
+def spec_num(fn):
+    m = re.match(r"^(\d{2})-", fn)
+    return m.group(1) if m else None
+
+
+def status_line(text, kinds=("Status", "Live")):
+    for l in text.split("\n")[:60]:
+        m = re.match(r"^\W*(Status|Live):?\W*\s*(.*)", l)
+        if m and m.group(1) in kinds:
+            return m.group(2) if m.group(1) == "Status" else (m.group(1) + ": " + m.group(2))
+    return None
+
+
+def log_dates(text):
+    sec = sections(text).get("Log")
+    ds = []
+    for _, l in sec or []:
+        m = re.match(r"^\s*[-*]\s*\**(\d{4}-\d{2}-\d{2})", l)
+        if m:
+            ds.append(m.group(1))
+    return ds
+
+
+def overlord_rows(repo):
+    """(open_rows, watching) from overlord.md: open_rows = [(id, spec cell, status cell)], watching = [text].
+    Columns are found by header name (id / status; goal and brief are the spec cell), so extra columns are fine."""
+    txt = read(Path(repo) / "agents/state/overlord.md") or ""
+    secs = sections(txt)
+    rows = []
+    for title, ls in secs.items():
+        if title.lower().startswith("open initiatives"):
+            t = table(ls)
+            if t and "id" in t[1] and "status" in t[1]:
+                ii, si = t[1].index("id"), t[1].index("status")
+                oth = [t[1].index(h) for h in ("goal", "brief") if h in t[1]]
+                for _, c in t[2]:
+                    if len(c) == len(t[1]) and plain(c[ii]):
+                        rows.append((plain(c[ii]), " ".join(c[i] for i in oth), c[si]))
+    watching = []
+    for title, ls in secs.items():
+        if title.lower().startswith("watching"):
+            for _, l in ls:
+                if l.startswith("- "):
+                    watching.append(l[2:])
+    return rows, watching
+
+
+def activity_rows(repo, since):
+    out = []
+    txt = read(Path(repo) / "agents/state/activity.tsv") or ""
+    for l in txt.split("\n")[1:]:
+        c = l.split("\t")
+        if len(c) < 4:
+            continue
+        try:
+            ts = dt.datetime.fromisoformat(c[0])
+        except ValueError:
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=TZ)
+        if ts >= since:
+            out.append(c)
+    return out
+
+
+def status_changes(repo, days):
+    """{spec file basename} whose Status: line was added/removed in the last `days` days — ONE git call. None => no git."""
+    out = git(repo, "log", "-p", "-U0", f"--since={days}.days", "--format=", "--", "roadmap/specs/", timeout=5)
+    if out is None:
+        return None
+    changed, cur = set(), None
+    for l in out.split("\n"):
+        if l.startswith("+++ "):
+            cur = os.path.basename(l[4:].strip()) if not l.startswith("+++ /dev/null") else None
+        elif l.startswith("--- ") or l.startswith("diff "):
+            continue
+        elif cur and re.match(r"^[+-]\W*Status:", l):
+            changed.add(cur)
+    return changed
+
+
+def build_arc(repo, now):
+    """-> (rows, outside, alarms) ; rows = [dict(spec,status,owner,inits,last,alarms)]"""
+    open_rows, watching = overlord_rows(repo)
+    since_dead = now - dt.timedelta(days=DEAD_DAYS)
+    acts = activity_rows(repo, since_dead)
+    changed = status_changes(repo, STALE_DAYS)
+    rows = []
+    for f in spec_files(repo):
+        fn = os.path.basename(f)
+        stem = fn[:-3]
+        num = spec_num(fn)
+        text = read(f) or ""
+        st = status_line(text, ("Status",))
+        owner = None
+        for l in text.split("\n")[:30]:
+            m = re.match(r"^\W*Owner:\W*\s*(\S.*)", l)
+            if m:
+                owner = plain(m.group(1)).split()[0].strip(".,;·") if plain(m.group(1)) else None
+                break
+        is_log = stem.endswith("-log")  # NN-log.md is spec NN's overflow Log: its dates count for NN, its row carries no initiatives
+        mine = [] if is_log else [(i, sp, s) for i, sp, s in open_rows if num and (re.match(r"^%s-" % num, i) or re.search(r"specs/%s-" % num, sp))]
+        if not owner:
+            owner = "framework" if mine else "—"
+        ds = log_dates(text) + ([] if is_log else [d for g in spec_files(repo) if os.path.basename(g) == "%s-log.md" % num for d in log_dates(read(g) or "")])
+        last = max(ds) if ds else None
+        al = []
+        recent_log = last and parse_ts(last) >= since_dead
+        named = any(num and (re.match(r"^%s-" % num, c[2]) or re.search(r"\bspec %s\b" % num, c[3])) for c in acts)
+        if not recent_log and not named:
+            al.append("DEAD")
+        if changed is not None and fn not in changed and st is not None:
+            al.append("STALE")
+        orphan = any(not NEXT.search(s) and not OWNER_WORD.search(s) for _, _, s in mine)
+        orphan = orphan or any(num and re.search(r"\bspec %s\b" % num, w) and not NEXT.search(w) and not OWNER_WORD.search(w) for w in watching)
+        if orphan:
+            al.append("ORPHAN")
+        siblings = [g for g in spec_files(repo) if os.path.basename(g).startswith((num or "~") + "-") and not g.endswith("-log.md")]
+        rows.append(dict(spec=num if len(siblings) == 1 and not is_log else stem, file=fn, status=cut(st, 200) if st else "—", owner=owner,
+                         inits=", ".join(i for i, _, _ in mine) or "—", last=last or "—", alarms=al))
+    outside = []
+    for rel, name in load_cfg(repo).get("outside", []):
+        if not isinstance(rel, str) or os.path.isabs(rel) or ".." in rel.replace("\\", "/").split("/"):
+            continue                    # repo-relative paths only: never read outside the repo
+        txt = read(Path(repo) / rel)
+        st = status_line(txt, ("Status", "Live")) if txt else None
+        mv = (git(repo, "log", "-1", "--format=%cs", "--", rel) or "").strip() or "—"
+        outside.append(dict(spec=name, file=rel, status=cut(st, 200) if st else ("(file missing)" if txt is None else "—"), owner="owner", inits="—", last=mv, alarms=[]))
+    return rows, outside
+
+
+def md_table(rows):
+    o = ["| spec | status | owner | initiatives | last moved | alarms |", "|---|---|---|---|---|---|"]
+    for r in rows:
+        o.append("| %s | %s | %s | %s | %s | %s |" % (cell(r["spec"]), cell(r["status"]), cell(r["owner"]), cell(r["inits"]), r["last"], " ".join(r["alarms"]) or "—"))
+    return o
+
+
+def alarm_block(rows):
+    o = []
+    for kind in ("DEAD", "STALE", "ORPHAN"):
+        hit = [r["spec"] for r in rows if kind in r["alarms"]]
+        if hit:
+            o.append("- SPEC %s %d: %s" % (kind, len(hit), " ".join(hit)))
+    return o or ["- none"]
+
+
+def cmd_arc(a):
+    now = now_local(a)
+    rows, outside = build_arc(a.repo, now)
+    gen = {"Specs": md_table(rows), "Outside the phases": md_table(outside), "Alarms": alarm_block(rows)}
+    if not a.write:
+        for k, v in gen.items():
+            print("## " + k + "\n" + "\n".join(v) + "\n")
+        return 0
+    path = Path(a.repo) / "agents/state/arc.md"
+    old = sections(read(path) or "")
+    hand = {}
+    for k, ls in old.items():
+        if k.startswith("Chains") or k.startswith("Moved since"):
+            hand[k] = [l for _, l in ls]
+    out = ["updated %s %s" % (now.strftime("%Y-%m-%d %H:%M"), tzlabel(now)), ""]
+    out += ["## Specs", *gen["Specs"], "", "## Outside the phases", *gen["Outside the phases"], ""]
+    chains = next((k for k in hand if k.startswith("Chains")), "Chains")
+    moved = next((k for k in hand if k.startswith("Moved since")), "Moved since %s" % now.strftime("%Y-%m-%d"))
+    out += ["## " + chains, *(hand.get(chains) or ["(none yet)", ""])]
+    if out[-1].strip():
+        out.append("")
+    out += ["## " + moved, *(hand.get(moved) or ["(none yet)", ""])]
+    if out[-1].strip():
+        out.append("")
+    out += ["## Alarms", *gen["Alarms"], ""]
+    path.write_text("\n".join(out), encoding="utf-8")
+    print("strategist: wrote %s (%d bytes)" % (path, path.stat().st_size))
+    return 0
+
+
+# ---------- lint ----------
+PRI_COLS = ["#", "slot", "what", "why", "next (who)", "since", "source"]
+THR_COLS = ["thread", "waiting on", "since", "how to check", "tag"]
+WHO = re.compile(r"\((framework|owner|waiting-on-[^)\s]+)\)\s*$")
+
+
+def count_lines(ls):
+    return [l for _, l in ls if l.strip()]
+
+
+def lint_table(name, ls, cols, v, check_row):
+    t = table(ls)
+    if not t:
+        v.append("%s: no table found" % name)
+        return []
+    hn, header, body = t
+    if header != cols:
+        v.append("%s:%d: header must be %s, got %s" % (name, hn, " | ".join(cols), " | ".join(header)))
+        return []
+    for n, c in body:
+        if len(c) != len(cols):
+            v.append("%s:%d: row has %d cells, expected %d" % (name, n, len(c), len(cols)))
+        else:
+            check_row(n, c)
+    return body
+
+
+def cmd_lint(a):
+    repo, v = Path(a.repo), []
+    st = repo / "agents/state"
+    stamp = re.compile(r"^(updated|re-ranked) (never|\d{4}-\d{2}-\d{2} \d{2}:\d{2} [A-Za-z0-9+:-]+)\s*$")  # "never" = the template, not yet written
+
+    def top(name, text, word):
+        first = text.split("\n", 1)[0]
+        if not stamp.match(first) or not first.startswith(word):
+            v.append("%s:1: line 1 must be '%s <YYYY-MM-DD HH:MM> <TZ>'" % (name, word))
+
+    # arc.md
+    t = read(st / "arc.md")
+    if t is None:
+        v.append("arc.md: missing")
+    else:
+        top("arc.md", t, "updated")
+        secs = sections(t)
+        for need in ("Specs", "Outside the phases", "Chains", "Moved since", "Alarms"):
+            if not any(k.startswith(need) for k in secs):
+                v.append("arc.md: section '## %s' missing" % need)
+        for k, ls in secs.items():
+            if k.startswith("Chains") and len(count_lines(ls)) > 8:
+                v.append("arc.md: Chains has %d lines, max 8" % len(count_lines(ls)))
+            if k.startswith("Moved since") and len(count_lines(ls)) > 10:
+                v.append("arc.md: Moved since has %d lines, max 10" % len(count_lines(ls)))
+    # priorities.md
+    t = read(st / "priorities.md")
+    if t is None:
+        v.append("priorities.md: missing")
+    else:
+        top("priorities.md", t, "re-ranked")
+
+        def pri_row(n, c):
+            if c[1].strip().lower() not in SLOTS:
+                v.append("priorities.md:%d: row %s: slot %r not in {%s}" % (n, c[0], c[1], ", ".join(SLOTS)))
+            if not re.search(r"\bG\d+\b", c[3]):
+                v.append("priorities.md:%d: row %s: why names no goal (G1, G2, ...)" % (n, c[0]))
+            if not WHO.search(plain(c[4])):
+                v.append("priorities.md:%d: row %s: next must end with (framework|owner|waiting-on-<who>)" % (n, c[0]))
+            for i, nm in ((2, "what"), (5, "since"), (6, "source")):
+                if not c[i].strip():
+                    v.append("priorities.md:%d: row %s: %s is empty" % (n, c[0], nm))
+        body = lint_table("priorities.md", list(enumerate(t.split("\n"), 1)), PRI_COLS, v, pri_row)
+        if len(body) > 10:
+            v.append("priorities.md: %d rows, max 10" % len(body))
+    # next.md
+    t = read(st / "next.md")
+    if t is None:
+        v.append("next.md: missing")
+    else:
+        ls = [l for l in t.split("\n") if l.strip()]
+        top("next.md", t, "updated")
+        want = ("now", "on deck", "week")
+        got = ls[1:]
+        if len(got) != 3:
+            v.append("next.md: expected 3 lines after 'updated' (now, on deck, week), got %d" % len(got))
+        for w, l in zip(want, got):
+            m = re.match(r"^- %s · (.+)$" % re.escape(w), l)
+            if not m:
+                v.append("next.md: line must be '- %s · <≤10 words>': %s" % (w, cut(l, 60)))
+            elif len(m.group(1).split()) > 10:
+                v.append("next.md: '%s' line has %d words, max 10" % (w, len(m.group(1).split())))
+    # threads.md
+    t = read(st / "threads.md")
+    if t is None:
+        v.append("threads.md: missing")
+    else:
+        top("threads.md", t, "updated")
+        if len(t.rstrip("\n").split("\n")) > 40:
+            v.append("threads.md: %d lines, max 40" % len(t.rstrip("\n").split("\n")))
+
+        def thr_row(n, c):
+            if plain(c[4]).lower() not in TAGS:
+                v.append("threads.md:%d: tag %r not in {%s}" % (n, c[4], ", ".join(TAGS)))
+            for i in (0, 1, 2, 3):
+                if not c[i].strip():
+                    v.append("threads.md:%d: %s is empty" % (n, THR_COLS[i]))
+        lint_table("threads.md", list(enumerate(t.split("\n"), 1)), THR_COLS, v, thr_row)
+    for l in v:
+        print(l)
+    return 1 if v else 0
+
+
+# ---------- alarms ----------
+def last_weekly(now, dow, hour):
+    """The most recent weekly hour at or before `now` (dow: 0=Mon..6=Sun)."""
+    d = now.astimezone(TZ)
+    cand = d.replace(hour=hour, minute=0, second=0, microsecond=0) - dt.timedelta(days=(d.weekday() - dow) % 7)
+    if cand > d:
+        cand -= dt.timedelta(days=7)
+    return cand
+
+
+def weekly_alarm(repo, now):
+    cfg = load_cfg(repo)
+    ft = parse_ts(cfg.get("weekly_first") or "")
+    if ft is None:  # empty weekly_first = the check-in alarm is off
+        return None
+    sun = last_weekly(now, int(cfg.get("weekly_dow", 6)), int(cfg.get("weekly_hour", 19)))
+    if sun.date() < ft.date():
+        return None
+    f = Path(repo) / "agents/state/brief" / ("%s-weekly.md" % sun.strftime("%Y-%m-%d"))
+    txt = read(f)
+    if txt:
+        body = [l for _, l in sections(txt).get("Decided", []) if l.strip()]
+        if body:
+            return None
+    return "WEEKLY CHECK-IN DUE %s" % sun.strftime("%Y-%m-%d")
+
+
+def cmd_alarms(a):
+    now = now_local(a)
+    out = []
+    for rel, label, lim in (("agents/state/priorities.md", "PRIORITIES", PRI_DAYS), ("agents/state/next.md", "NEXT", NEXT_DAYS)):
+        age = file_age_days(a.repo, rel, now)
+        if age is None and not (Path(a.repo) / rel).exists():
+            out.append("%s MISSING" % label)
+        elif age is not None and age > lim:
+            out.append("%s STALE %dd" % (label, age))
+    w = weekly_alarm(a.repo, now)
+    if w:
+        out.append(w)
+    try:
+        rows, _ = build_arc(a.repo, now)
+        out += [l[2:] for l in alarm_block(rows) if l != "- none"]
+    except Exception as e:
+        out.append("ARC ERROR %s" % type(e).__name__)
+    for l in out:
+        print(l)
+    return 0
+
+
+def main():
+    import argparse
+    common = argparse.ArgumentParser(add_help=False)  # --repo/--now work before or after the subcommand
+    common.add_argument("--repo", default=argparse.SUPPRESS)
+    common.add_argument("--now", default=argparse.SUPPRESS)
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0], parents=[common])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("arc", parents=[common])
+    s.add_argument("--write", action="store_true")
+    sub.add_parser("lint", parents=[common])
+    sub.add_parser("alarms", parents=[common])
+    a = ap.parse_args()
+    a.repo, a.now = getattr(a, "repo", str(SELF)), getattr(a, "now", None)
+    set_tz(load_cfg(a.repo).get("timezone", "UTC"))
+    return {"arc": cmd_arc, "lint": cmd_lint, "alarms": cmd_alarms}[a.cmd](a)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except BrokenPipeError:
+        sys.exit(0)

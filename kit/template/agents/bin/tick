@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+# tick — the governor loop, headless. Run by a daily timer (see agents/systemd/ or the cron line there); safe to run by hand.
+#   tick              the daily loop (agents/prompts/tick.md)
+#   tick weekly       skip the loop, run the strategist procedure in weekly mode only (run it from a weekly timer)
+#   tick senses       run agents/senses.d/*.sh only, print the findings, change nothing
+#   TICK_DRY=1 tick   print the prompt it would send and exit (no model call, no git, no ledger)
+# Knobs live in agents/state/ceiling.json: tick_mode (propose|act, default propose), the daily USD/turn ceiling,
+# tick_model, tick_max_turns, tick_max_usd, tick_push.
+# Two things are NOT read from ceiling.json (an agent that could edit it could otherwise pick what runs):
+#   HATCHERY_CLAUDE_BIN   the claude executable (default: claude)           } set in the systemd unit / cron
+#   HATCHERY_NOTIFY_CMD   the command that may reach you (default: none)    } line, i.e. by YOU, outside the repo
+#   HATCHERY_CLAUDE_ARGS  extra arguments for the headless run (shell-style words). --settings, --setting-sources,
+#                         --mcp-config, --plugin-dir, --add-dir, --allowedTools, --bare, --dangerously-* and any
+#                         --permission-mode other than default / acceptEdits are refused.
+#   HATCHERY_ALLOW_SKIP_PERMISSIONS=1  the only way the --dangerously-* / bypassPermissions entries are accepted (not recommended)
+# Order: circuit breaker -> pull (if a remote exists) -> single writer -> senses -> headless run -> ledger row -> commit.
+# Needs: bash, python3, git, and the `claude` CLI (not needed for TICK_DRY or `tick senses`).
+set -euo pipefail
+REPO="${AGENTS_REPO:-$(cd "$(dirname "$0")/../.." && pwd)}"
+cd "$REPO"
+CJ=agents/state/ceiling.json
+cfg() { python3 - "$CJ" "$1" "$2" <<'PY'
+import json, sys
+try: v = json.load(open(sys.argv[1])).get(sys.argv[2])
+except Exception: v = None
+if v is None: print(sys.argv[3])
+elif isinstance(v, (list, dict)): print(json.dumps(v))
+else: print(str(v).lower() if isinstance(v, bool) else v)
+PY
+}
+
+run_senses() {  # each executable agents/senses.d/*.sh prints rows: severity<TAB>what<TAB>evidence<TAB>fix-list<TAB>runbook
+  # A sense is code the tick runs unattended: only scripts that are TRACKED by git and unchanged since HEAD run.
+  # An untracked script, or any uncommitted change under agents/senses.d, is skipped and reported as a finding.
+  out=agents/state/senses.tsv
+  mkdir -p agents/state
+  printf 'severity\twhat\tevidence\tfix-list\trunbook\n' > "$out"
+  local f dirty=0
+  if ! git diff --quiet HEAD -- agents/senses.d 2>/dev/null; then dirty=1; fi
+  for f in agents/senses.d/*.sh; do
+    [ -f "$f" ] && [ -x "$f" ] || continue
+    if [ "$dirty" = 1 ] || ! git ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
+      printf 'warn\tsense skipped: %s\tnot tracked by git, or agents/senses.d differs from HEAD (commit it yourself to enable it)\thand\t-\n' "$(basename "$f")" >> "$out"
+      continue
+    fi
+    if ! timeout 30 "$f" >> "$out" 2>/dev/null; then
+      printf 'warn\tsense failed: %s\texit non-zero or timed out\tfair\t-\n' "$(basename "$f")" >> "$out"
+    fi
+  done
+  cat "$out"
+}
+
+kind=daily; [ "${1:-}" = weekly ] && kind=weekly
+if [ "${1:-}" = senses ]; then run_senses; exit 0; fi
+id=tick; [ "$kind" = weekly ] && id=tick-weekly
+dry=${TICK_DRY:-}
+export AGENT_ROLE=overlord AGENT_INITIATIVE=tick AGENTS_REPO="$REPO"
+
+# circuit breaker (unattended runs only), checked BEFORE anything else touches the repo. It FAILS CLOSED: a missing,
+# unreadable or corrupt ceiling.json or costs.tsv, a non-numeric / non-finite / non-positive cap, or any error at
+# all counts as SPENT. Only an explicit HEADROOM from the check lets a run start. Exit 0 so a timer does not count a failure.
+ceiling_status() {
+  python3 - "$CJ" agents/state/costs.tsv <<'PY' 2>/dev/null || echo "SPENT (the check itself failed)"
+import csv, datetime, json, math, sys
+try:
+    try: c = json.load(open(sys.argv[1]))
+    except Exception: print("SPENT (ceiling.json missing or unreadable: no unattended run may start)"); sys.exit(0)
+    if not isinstance(c, dict): print("SPENT (ceiling.json is not an object)"); sys.exit(0)
+    def cap(k):
+        v = c.get(k)   # a missing cap is SPENT too: no silent default
+        if isinstance(v, bool) or not isinstance(v, (int, float)): raise ValueError(k)
+        v = float(v)
+        if not math.isfinite(v) or v <= 0: raise ValueError(k)
+        return v
+    try: cu, ct = cap("daily_usd"), cap("daily_turns")
+    except ValueError as e: print("SPENT (ceiling.json: %s is missing or not a finite positive number)" % e); sys.exit(0)
+    today = datetime.date.today().isoformat(); usd = turns = 0.0
+    try:
+        for r in csv.DictReader(open(sys.argv[2]), delimiter="\t"):
+            if r["ts"][:10] == today and r.get("origin") == "unattended":
+                usd += float(r["cost_usd"] or 0) if r["cost_usd"] not in ("", "null") else 0
+                turns += float(r["turns"] or 0) if r["turns"] not in ("", "null") else 0
+    except FileNotFoundError: pass
+    if not (math.isfinite(usd) and math.isfinite(turns)): print("SPENT (costs.tsv holds a non-finite number)"); sys.exit(0)
+    spent = usd >= cu or turns >= ct
+    print("%s (unattended: $%.2f of $%s, %d of %s turns)" % ("SPENT" if spent else "HEADROOM", usd, cu, turns, ct))
+except SystemExit: raise
+except BaseException as e: print("SPENT (check failed: %s)" % type(e).__name__)
+PY
+}
+if [ -z "$dry" ]; then
+  cs="$(ceiling_status)"; echo "tick: ceiling: $cs" >&2
+  case "$cs" in HEADROOM*) ;; *) echo "tick: ceiling spent or unreadable — exit" >&2; exit 0 ;; esac
+fi
+
+if [ -z "$dry" ] && git remote | grep -q .; then
+  git pull -q --ff-only || echo "tick: pull failed (continuing on the local branch)" >&2
+fi
+mode=$(cfg tick_mode propose); [ "$mode" = act ] || mode=propose
+notify_cmd="${HATCHERY_NOTIFY_CMD:-}"
+notify=off; [ -n "$notify_cmd" ] && notify=on
+
+# single writer: any LIVE registered session working in this repo (the session registry your hooks keep) is a writer
+# -> the attended session wins. A session counts if its role is overlord OR its cwd is inside this repo.
+if [ -z "$dry" ]; then
+  if python3 - "$REPO" agents/state/sessions <<'PY'
+import glob, json, os, sys
+repo = os.path.realpath(sys.argv[1])
+for f in glob.glob(os.path.join(sys.argv[2], "*.json")):
+    try:
+        d = json.load(open(f))
+        pid = int(d.get("pid") or 0)
+        if pid > 0:
+            try: os.kill(pid, 0)
+            except ProcessLookupError: continue
+            except PermissionError: pass
+        cwd = os.path.realpath(str(d.get("cwd") or "/nonexistent"))
+        if d.get("role") == "overlord" or cwd == repo or cwd.startswith(repo + os.sep):
+            print("tick: a live session is writing in this repo (role=%s) — exit" % d.get("role"), file=sys.stderr); sys.exit(0)
+    except SystemExit: raise
+    except Exception: continue
+sys.exit(1)
+PY
+  then exit 0; fi
+fi
+
+# the files that decide what this run may do must be exactly what is committed: refuse if any differs from HEAD
+if [ -z "$dry" ] && ! git diff --quiet HEAD -- agents/state/ceiling.json agents/bin agents/prompts agents/guard.conf 2>/dev/null; then
+  echo "tick: ceiling.json / agents/bin / agents/prompts / guard.conf differ from HEAD (or git failed) — commit your change yourself, then re-run — exit" >&2; exit 0
+fi
+
+ts=$(date +%Y%m%d-%H%M)
+mkdir -p agents/state/runs agents/state/brief
+log=agents/state/runs/$id-$ts.log; stream=agents/state/runs/$id-$ts.json
+if [ "$kind" = daily ] && [ -z "$dry" ]; then run_senses >/dev/null; fi
+if [ "$kind" = weekly ]; then
+  prompt="$(printf 'TICK_KIND=weekly\nTICK_MODE=%s\nNOTIFY=%s\nNOTIFY_CMD=%s\nNow: %s\nThis is the weekly hour: skip the loop; read agents/prompts/strategist.md and run the strategist procedure in weekly mode only.\n' "$mode" "$notify" "$notify_cmd" "$(date -Is)")"
+else
+  prompt="$(printf 'TICK_MODE=%s\nNOTIFY=%s\nNOTIFY_CMD=%s\nNow: %s\nRun the tick: follow the loop in your system prompt (agents/prompts/tick.md) in order and write the morning brief.\n' "$mode" "$notify" "$notify_cmd" "$(date -Is)")"
+fi
+if [ -n "$dry" ]; then printf '%s\n' "$prompt"; exit 0; fi
+
+claude_bin="${HATCHERY_CLAUDE_BIN:-claude}"
+# Extra arguments come from the unit's environment (HATCHERY_CLAUDE_ARGS, shell-style words), never from ceiling.json.
+# They are checked against a deny-list of flags that would drop the hooks or widen what the run may do.
+extra_out="$(python3 - "${HATCHERY_CLAUDE_ARGS:-}" "${HATCHERY_ALLOW_SKIP_PERMISSIONS:-}" <<'PY' 2>&1
+import shlex, sys
+try: args = shlex.split(sys.argv[1])
+except ValueError as e: print("REFUSED: HATCHERY_CLAUDE_ARGS does not parse (%s)" % e); sys.exit(1)
+allow_skip = sys.argv[2] == "1"
+BAD = {"--settings", "--setting-sources", "--mcp-config", "--plugin-dir", "--add-dir", "--allowedtools", "--allowed-tools",
+       "--bare", "--permission-prompt-tool"}
+for i, a in enumerate(args):
+    name, _, val = a.partition("=")
+    low = name.lower()
+    if low in BAD: print("REFUSED: %s is not allowed in HATCHERY_CLAUDE_ARGS (it can switch off the hooks or widen the run)" % name); sys.exit(1)
+    if (low.startswith("--dangerously-") or low.startswith("--allow-dangerously-") or "bypasspermissions" in a.lower()) and not allow_skip:
+        print("REFUSED: %s skips permissions; only the unit may allow it (HATCHERY_ALLOW_SKIP_PERMISSIONS=1)" % a); sys.exit(1)
+    if low == "--permission-mode":
+        v = val or (args[i + 1] if i + 1 < len(args) else "")
+        if v not in ("default", "acceptEdits") and not (allow_skip and v == "bypassPermissions"):
+            print("REFUSED: --permission-mode %s is not allowed (default or acceptEdits only)" % v); sys.exit(1)
+for a in args: print(a)
+PY
+)" || { echo "tick: ${extra_out} — exit" >&2; exit 0; }
+extra=(); [ -z "$extra_out" ] || mapfile -t extra <<< "$extra_out"
+set +e
+"$claude_bin" -p "$prompt" --model "$(cfg tick_model opus)" --max-turns "$(cfg tick_max_turns 40)" \
+  --max-budget-usd "$(cfg tick_max_usd 5)" --append-system-prompt-file agents/prompts/tick.md \
+  --add-dir agents/state --output-format json ${extra[@]+"${extra[@]}"} > "$stream" 2>"$log.err"
+rc=$?
+set -e
+read -r turns cost dur sub < <(python3 - "$stream" "$log" <<'PY'
+import json, sys
+try: r = json.load(open(sys.argv[1]))
+except Exception: r = {}
+open(sys.argv[2], "w").write(str(r.get("result", "")) + "\n")
+print(r.get("num_turns", "null"), r.get("total_cost_usd", "null"), int((r.get("duration_ms") or 0) / 1000), r.get("subtype", "no-result"))
+PY
+)
+[ -f agents/state/costs.tsv ] || printf 'ts\tid\tmodel\tturns\tcost_usd\tduration_s\tsubtype\torigin\n' > agents/state/costs.tsv
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\tunattended\n' "$(date -Is)" "$id" "$(cfg tick_model opus)" "$turns" "$cost" "$dur" "$sub" >> agents/state/costs.tsv
+# whatever the tick wrote (brief, Last wake, activity, a spec Log) is committed by path - never ceiling.json; your pre-commit hook still runs
+git add agents/state ':!agents/state/ceiling.json' roadmap 2>/dev/null || true
+if ! git diff --cached --quiet 2>/dev/null; then
+  git commit -qm "$id $ts ($mode): $sub" || echo "tick: commit refused (pre-commit)" >&2
+fi
+if [ "$(cfg tick_push false)" = true ] && git remote | grep -q .; then git push -q || echo "tick: push failed" >&2; fi
+echo "$id $ts done rc=$rc mode=$mode turns=$turns cost=$cost $sub"

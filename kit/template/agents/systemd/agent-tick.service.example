@@ -1,0 +1,25 @@
+# Copy to /etc/systemd/system/agent-tick.service (system) or ~/.config/systemd/user/ (user) and edit the <...> bits.
+[Unit]
+Description=Governor tick - daily headless overlord (agents/bin/tick)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=<repo-path>/agents/bin/tick
+
+[Service]
+Type=oneshot
+# Drop User/Group for a user unit.
+User=<user>
+Group=<user>
+WorkingDirectory=<repo-path>
+Environment=HOME=<home-dir>
+Environment=AGENTS_REPO=<repo-path>
+# What runs and who gets told are set HERE (outside the repo), never in ceiling.json:
+Environment=HATCHERY_CLAUDE_BIN=<absolute path to the claude CLI, e.g. <home-dir>/.local/bin/claude>
+# Environment=HATCHERY_NOTIFY_CMD=<a command that only ever reaches you; called as: <cmd> "<title>" "<body>">
+# Environment="HATCHERY_CLAUDE_ARGS=--permission-mode acceptEdits"
+# Keep THIS FILE (and ~/.config/systemd/) writable only by you: if the agent's user can edit the unit, it chooses what runs.
+# Do NOT set HATCHERY_ALLOW_SKIP_PERMISSIONS=1 unless you accept an unattended session with no permission prompts.
+# HATCHERY_CLAUDE_BIN above is the absolute path to the claude CLI (ceiling.json is not consulted for it).
+ExecStart=<repo-path>/agents/bin/tick
+TimeoutStartSec=90min
+Nice=10

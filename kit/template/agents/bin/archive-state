@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""archive-state — move settled rows out of agents/state/overlord.md into agents/state/archive/, byte for byte.
+
+  archive-state [--apply] [--notes] [--now YYYY-MM-DD] [--days N] [--state DIR]
+
+Dry run by default (prints what would move and the byte counts); --apply writes. Lossless: every moved byte is
+appended verbatim to an archive file (bytes removed == bytes appended, printed and checked before writing).
+Idempotent: a second --apply prints "nothing to move". Never touches a table header or separator row. Tables are read
+by header name (so extra columns are fine). Run it when `rehydrate` prints OVER CAP for overlord.md. Stdlib only.
+
+  (a) Recently closed — table rows whose `closed` cell, and bullets whose first-line date, are older than --days
+      (default 14)                                                       -> archive/closed-<YYYY-MM>.md
+  (b) Ask the owner — rows whose Go/answer cell is non-empty AND not a placeholder ("—", "*(pending…)*") AND carries no
+      still-open word (pending|still … open|open|owed|waiting|awaits|apply pending)   -> archive/asks-<YYYY-MM>.md
+  (e) Open initiatives — rows whose status cell begins MERGED/DONE/LIVE/CLOSED, has no open word, and whose newest
+      date in the row is older than --days                               -> archive/initiatives-<YYYY-MM>.md
+  (c) Watching — bullets (with their continuation lines) whose first line has a date older than --days; a bullet
+      carrying `<!-- keep -->` never moves                               -> archive/watching-<YYYY-MM>.md
+  (d) Last wake — keep everything before the first " (prev "; the chain moves  -> archive/lastwake.md
+  --notes: notes-to-overmind.md — the marker blocks above the LAST `<!-- overmind review … -->` line (the file's
+      preamble stays)                                                    -> archive/notes-handled.md
+
+Dates without a year (MM-DD) take --now's year (the previous year if that would be in the future). The archive month
+is the month of the item's own date. Rows with no parseable date never move. Heuristics are deliberately dumb and
+conservative: anything ambiguous stays.
+"""
+import datetime as dt, os, re, sys
+from pathlib import Path
+
+DATE = re.compile(r"(?<![\d:.-])(?:(20\d\d)-)?(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])(?![\d:-])")
+OPEN_WORDS = re.compile(r"pending|still [^.|]{0,20}\bopen\b|\bopen\b|\bowed?\b|waiting|awaits?|waits? ", re.I)
+PLACEHOLDER = re.compile(r"^[\s—–\-*_]*$|^\*?\(pending", re.I)
+
+
+def to_date(m, now):
+    y, mo, d = m.group(1), int(m.group(2)), int(m.group(3))
+    try:
+        if y:
+            return dt.date(int(y), mo, d)
+        c = dt.date(now.year, mo, d)
+        return c if c <= now else dt.date(now.year - 1, mo, d)
+    except ValueError:
+        return None
+
+
+def newest_date(s, now):
+    ds = [x for x in (to_date(m, now) for m in DATE.finditer(s)) if x]
+    return max(ds) if ds else None
+
+
+def cells(row):
+    s = row.strip().strip("|").replace("\\|", "\x00")
+    return [c.strip().replace("\x00", "|") for c in s.split("|")]
+
+
+def header_of(lines, a, b):
+    """lower-cased header cells of the first table in lines[a:b], or []."""
+    for i in range(a, b):
+        if lines[i].startswith("|"):
+            return [c.lower() for c in cells(lines[i])]
+    return []
+
+
+def col(hdr, *names):
+    for i, h in enumerate(hdr):
+        if any(h == n or h.startswith(n) for n in names):
+            return i
+    return None
+
+
+def section_ranges(lines):
+    """name -> (first_body_idx, end_idx) over '## ' sections."""
+    out, cur = {}, None
+    for i, l in enumerate(lines):
+        if l.startswith("## "):
+            if cur: out[cur][1] = i
+            cur = next((n for n in ("Open initiatives", "Recently closed", "Ask", "Watching") if l[3:].strip().lower().startswith(n.lower())), l[3:].strip())
+            out[cur] = [i + 1, len(lines)]
+    return out
+
+
+def plan_state(text, now, days):
+    """Return (new_text, moves) where moves = {archive_filename: [chunk, ...]} and chunk is verbatim removed text."""
+    lines = text.split("\n")           # joining with "\n" restores the exact original
+    cutoff = now - dt.timedelta(days=days)
+    drop = set()
+    moves = {}
+    def move(fname, idxs):
+        chunk = "\n".join(lines[i] for i in idxs) + "\n"
+        moves.setdefault(fname, []).append(chunk)
+        drop.update(idxs)
+    secs = section_ranges(lines)
+
+    def month(d): return d.strftime("%Y-%m")
+
+    # (a) Recently closed — rows by `closed` cell, bullets by first-line date
+    if "Recently closed" in secs:
+        a, b = secs["Recently closed"]
+        i = a
+        while i < b:
+            l = lines[i]
+            if l.startswith("- "):
+                d = newest_date(l, now)
+                j = i + 1
+                while j < b and lines[j].startswith((" ", "\t")) and lines[j].strip(): j += 1
+                if d and d < cutoff and "<!-- keep -->" not in l:
+                    idxs = list(range(i, j))
+                    if j < b and lines[j] == "": idxs.append(j)      # the blank line that followed it
+                    move(f"closed-{month(d)}.md", idxs)
+                i = j
+                continue
+            if l.startswith("|") and i >= a + 2 and lines[i - 1].startswith("|") and not re.match(r"^\|[\s:|-]+\|?\s*$", l):
+                # data row: needs a header + separator above it
+                c = cells(l)
+                hdr = header_of(lines, a, b)
+                ci = col(hdr, "closed")
+                if ci is None or ci >= len(c): ci = len(c) - 1
+                if c and c[0].lower() != "id" and "<!-- keep -->" not in l:
+                    d = newest_date(c[ci], now)
+                    if d and d < cutoff: move(f"closed-{month(d)}.md", [i])
+            i += 1
+
+    # (b) Ask the owner — rows with a settled answer cell
+    if "Ask" in secs:
+        a, b = secs["Ask"]
+        hdr = header_of(lines, a, b)
+        gi, oi = col(hdr, "go", "answer"), col(hdr, "opened", "asked")
+        for i in range(a, b):
+            l = lines[i]
+            if gi is None or not l.startswith("|") or re.match(r"^\|[\s:|-]+\|?\s*$", l): continue
+            c = cells(l)
+            if len(c) != len(hdr) or not c[0].isdigit() or "<!-- keep -->" in l: continue
+            ans = c[gi]
+            if PLACEHOLDER.match(ans) or OPEN_WORDS.search(ans): continue
+            d = to_date(DATE.search(c[oi]), now) if oi is not None and DATE.search(c[oi]) else None
+            d = d or now
+            idxs = [i]
+            if i + 1 < b and lines[i + 1] == "": idxs.append(i + 1)
+            move(f"asks-{month(d)}.md", idxs)
+
+    # (e) Open initiatives — rows whose status cell says the work is finished (MERGED/DONE/LIVE …, no open word) and
+    #     whose newest date anywhere in the row is older than the cutoff -> archive/initiatives-<YYYY-MM>.md
+    if "Open initiatives" in secs:
+        a, b = secs["Open initiatives"]
+        hdr = header_of(lines, a, b)
+        si = col(hdr, "status")
+        for i in range(a, b):
+            l = lines[i]
+            if not l.startswith("|") or re.match(r"^\|[\s:|-]+\|?\s*$", l): continue
+            c = cells(l)
+            if si is None or len(c) != len(hdr) or c[0].lower() == "id": continue
+            st = re.sub(r"[*_`]", "", c[si]).strip()
+            if not re.match(r"(Design )?(MERGED|DONE|LIVE|CLOSED)\b", st, re.I) or OPEN_WORDS.search(c[si]) or "<!-- keep -->" in l: continue
+            d = newest_date(l, now)
+            if d and d < cutoff:
+                idxs = [i] + ([i + 1] if i + 1 < b and lines[i + 1] == "" else [])
+                move(f"initiatives-{month(d)}.md", idxs)
+
+    # (c) Watching — bullets with continuation lines
+    if "Watching" in secs:
+        a, b = secs["Watching"]
+        i = a
+        while i < b:
+            l = lines[i]
+            if l.startswith("- "):
+                j = i + 1
+                while j < b and lines[j] != "" and not lines[j].startswith("- ") and not lines[j].startswith("*("): j += 1
+                d = newest_date(l, now)
+                if d and d < cutoff and "<!-- keep -->" not in l:
+                    idxs = list(range(i, j))
+                    # absorb the bullet's trailing blank line only (indented sub-items stay with it)
+                    if j < b and lines[j] == "": idxs.append(j);
+                    move(f"watching-{month(d)}.md", idxs)
+                i = j
+            else:
+                i += 1
+
+    # (d) Last wake — the (prev …) chain
+    wake_idx = None
+    for i, l in enumerate(lines):
+        if l.lower().startswith("## last wake"):
+            wake_idx = next((j for j in range(i + 1, len(lines)) if lines[j].strip() and not lines[j].startswith("## ")), None)
+            break
+    if wake_idx is None:
+        wake_idx = next((i for i, l in enumerate(lines) if l.startswith("Last wake:")), None)
+    for i, l in ([] if wake_idx is None else [(wake_idx, lines[wake_idx])]):
+        if True:
+            k = l.find(" (prev ")
+            if k > 0:
+                chain = l[k + 1:]                      # drop the one leading space; the archive line gets its own "\n" => same byte count
+                moves.setdefault("lastwake.md", []).append(chain + "\n")
+                lines[i] = l[:k]
+            break
+
+    new = "\n".join(l for i, l in enumerate(lines) if i not in drop)
+    return new, moves
+
+
+def plan_notes(text):
+    lines = text.split("\n")
+    marks = [i for i, l in enumerate(lines) if l.startswith("<!-- overmind review")]
+    if len(marks) < 2: return text, {}
+    first, last = marks[0], marks[-1]
+    chunk = "\n".join(lines[first:last]) + "\n"
+    return "\n".join(lines[:first] + lines[last:]), {"notes-handled.md": [chunk]}
+
+
+def run(state_dir, apply, notes, now, days):
+    sd = Path(state_dir); ar = sd / "archive"
+    jobs = []     # (src_path, old_text, new_text, moves)
+    p = sd / "overlord.md"
+    old = p.read_text(encoding="utf-8")
+    new, mv = plan_state(old, now, days)
+    jobs.append((p, old, new, mv))
+    if notes:
+        n = sd / "notes-to-overmind.md"
+        o2 = n.read_text(encoding="utf-8"); n2, mv2 = plan_notes(o2)
+        jobs.append((n, o2, n2, mv2))
+    moved = 0
+    for src, o, n, mv in jobs:
+        rem = len(o.encode()) - len(n.encode())
+        app = sum(len(c.encode()) for cs in mv.values() for c in cs)
+        if rem != app:
+            print(f"archive-state: LOSS CHECK FAILED for {src.name}: removed {rem} != appended {app} — nothing written", file=sys.stderr)
+            return 3
+        if not mv: continue
+        moved += rem
+        print(f"{src.name}: {len(o.encode())} -> {len(n.encode())} bytes (moves {rem} B)")
+        for fname, cs in sorted(mv.items()):
+            print(f"  -> archive/{fname}: {len(cs)} chunk(s), {sum(len(c.encode()) for c in cs)} B")
+            if not apply:
+                for c in cs: print("      " + c.split("\n")[0][:110])
+    if not moved:
+        print("nothing to move"); return 0
+    if not apply:
+        print(f"dry run — {moved} B would move; re-run with --apply"); return 0
+    ar.mkdir(exist_ok=True)
+    for src, o, n, mv in jobs:
+        for fname, cs in mv.items():
+            f = ar / fname
+            with open(f, "a", encoding="utf-8") as fh: fh.write("".join(cs))
+        if mv: src.write_text(n, encoding="utf-8")
+    print(f"applied — {moved} B moved")
+    return 0
+
+
+def main(argv):
+    apply = "--apply" in argv; notes = "--notes" in argv
+    def opt(name, default):
+        return argv[argv.index(name) + 1] if name in argv else default
+    now = dt.date.fromisoformat(opt("--now", dt.date.today().isoformat()))
+    state = opt("--state", str(Path(os.environ.get("AGENTS_REPO") or Path(__file__).resolve().parents[2]) / "agents" / "state"))
+    if "-h" in argv or "--help" in argv: print(__doc__); return 0
+    return run(state, apply, notes, now, int(opt("--days", 14)))
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

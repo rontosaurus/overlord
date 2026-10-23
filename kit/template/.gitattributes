@@ -1,0 +1,4 @@
+# Keep LF line endings: the agents/bin scripts are bash, and a CRLF copy fails on "bash\r".
+* text=auto eol=lf
+agents/bin/* text eol=lf
+*.sh text eol=lf

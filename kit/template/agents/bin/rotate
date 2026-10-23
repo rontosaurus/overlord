@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# rotate - the file side of a clear-and-carry rotation (agents/prompts/rotation.md). bash + coreutils only.
+#
+#   rotate check <carry.md>
+#       validate a carry file: 2000-5000 bytes, a header line "role | date | why | session id", and the five
+#       sections. Exit 1 and say what is missing; exit 0 and one "ok" line otherwise.
+#   rotate record --role <role> --old <sid> --carry <path|-> --title "<closed title>" [--new <sid>]
+#                 [--kind rotate|done] [--star-title "<successor title>"]
+#       append the close row to agents/state/carry/closed.tsv (what `carry` audits) and, for kind rotate with
+#       --new, write agents/state/sessions/star-<role> = "<new sid><TAB><star-title>" (the star moves to the
+#       successor). Idempotent per (old sid, kind): a second call replaces its row. --carry is a path relative
+#       to the repo (agents/state/carry/<role>.md); "-" for a close with nothing to carry.
+#
+# State root: $ROTATE_STATE, else $AGENTS_REPO/agents/state. The session-tool calls (create / retitle / archive a
+# session) are the session's own tool calls in the procedure, not this script's - it works without them.
+set -u
+STATE="${ROTATE_STATE:-${AGENTS_REPO:?set AGENTS_REPO (or ROTATE_STATE)}/agents/state}"
+
+usage() { sed -n '2,15p' "$0"; exit 2; }
+safe() { case "$1" in ''|*[!A-Za-z0-9_-]*) return 1 ;; esac; }   # role / session ids end up in file names
+
+check() {
+  local p="${1:-}" n head s bad=""
+  [ -f "$p" ] || { echo "rotate check: $p does not exist"; return 1; }
+  n=$(wc -c < "$p" | tr -d ' ')
+  { [ "$n" -ge 2000 ] && [ "$n" -le 5000 ]; } || bad="$bad; size $n B outside 2000-5000"
+  head="$(head -1 "$p")"
+  [ "$(printf '%s' "$head" | tr -cd '|' | wc -c | tr -d ' ')" -ge 3 ] || bad="$bad; header line lacks role | date | why | session id"
+  for s in "URGENT in flight" "waiting on the owner" "done this session" "open, not urgent" "lost on clear"; do
+    grep -qiF -- "$s" "$p" || bad="$bad; missing section: $s"
+  done
+  if [ -n "$bad" ]; then echo "rotate check: ${bad#; }"; return 1; fi
+  echo "rotate check: ok ($n B)"
+}
+
+record() {
+  local role="" old="" new="" carry="" title="" kind=rotate stitle=""
+  while [ $# -gt 0 ]; do
+    [ $# -ge 2 ] || usage
+    case "$1" in
+      --role) role="$2" ;; --old) old="$2" ;; --new) new="$2" ;; --carry) carry="$2" ;;
+      --title) title="$2" ;; --kind) kind="$2" ;; --star-title) stitle="$2" ;;
+      *) usage ;;
+    esac; shift 2
+  done
+  [ -n "$role" ] && [ -n "$old" ] && [ -n "$carry" ] && [ -n "$title" ] || { echo "rotate record: --role --old --carry --title are required"; return 2; }
+  safe "$role" || { echo "rotate record: role must be letters, digits, - or _"; return 2; }
+  safe "$old" || { echo "rotate record: --old must be a session id (letters, digits, -)"; return 2; }
+  [ -z "$new" ] || safe "$new" || { echo "rotate record: --new must be a session id"; return 2; }
+  case "$kind" in rotate|done) ;; *) echo "rotate record: kind must be rotate or done"; return 2 ;; esac
+  case "$carry" in /*|*..*) echo "rotate record: --carry must be a path inside the repo"; return 2 ;; esac
+  [ -L "$STATE" ] || [ -L "$STATE/carry" ] || [ -L "$STATE/sessions" ] && { echo "rotate record: a state directory is a symlink - refusing"; return 1; }
+  mkdir -p "$STATE/carry" || return 1
+  local f="$STATE/carry/closed.tsv" tmp ts
+  [ -L "$f" ] && { echo "rotate record: closed.tsv is a symlink - refusing"; return 1; }
+  title="$(printf '%s' "$title" | tr '\t\n\r' '   ')"; stitle="$(printf '%s' "$stitle" | tr '\t\n\r' '   ')"
+  ts="$(date -Is)"
+  tmp="$(mktemp "$STATE/carry/.closed.XXXXXX")" || return 1
+  printf 'ts\tkind\trole\tsession\tcarry_path\ttitle\n' > "$tmp"
+  [ -f "$f" ] && awk -F'\t' -v o="$old" -v k="$kind" 'NR>1 && !($4==o && $2==k)' "$f" >> "$tmp"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$ts" "$kind" "$role" "$old" "$carry" "$title" >> "$tmp"
+  mv "$tmp" "$f"
+  local msg="rotate record: $kind row for ${old:0:8} in $f"
+  if [ "$kind" = rotate ] && [ -n "$new" ]; then
+    mkdir -p "$STATE/sessions" || return 1
+    [ -L "$STATE/sessions/star-$role" ] && { echo "rotate record: star file is a symlink - refusing"; return 1; }
+    printf '%s\t%s\n' "$new" "$stitle" > "$STATE/sessions/star-$role"
+    msg="$msg; star-$role -> ${new:0:8}"
+  fi
+  echo "$msg"
+}
+
+case "${1:-}" in
+  check) [ $# -eq 2 ] || usage; check "$2" ;;
+  record) shift; record "$@" ;;
+  *) usage ;;
+esac

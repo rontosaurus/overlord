@@ -1,0 +1,371 @@
+#!/usr/bin/env python3
+"""usage — token + cost ledger for your Claude Code sessions (main sessions AND subagents).
+
+  usage scan            read <claude config dir>/projects/**/*.jsonl and upsert one row per (session, agent, day, model)
+                        into agents/state/usage.tsv. Idempotent; rows for transcripts that were pruned since are KEPT.
+  usage report [--md]   efficiency tables: by role, by persona (subagents), by model, by initiative, by day
+  usage session [sid]   close-out summary for ONE session (default: $CLAUDE_CODE_SESSION_ID, else the session registry,
+                        else the newest transcript of this project): tokens, API-equivalent $, context now/peak,
+                        idle re-writes, subagent share
+  usage price           the price table in use
+
+Dollars here are an API-LIST-PRICE EQUIVALENT of the work done: a measure for comparing roles, personas and models,
+not a bill (a subscription is not billed per token). Tokens are kept per model so any row can be re-priced.
+
+Prices: a built-in table of list prices per million tokens (verify it against the vendor's pricing page; it goes
+stale). Override or extend it with a JSON file at agents/state/prices.json (or $USAGE_PRICES):
+  {"web_search_per_1k": 10, "aliases": {"<id>": "<canonical id>"},
+   "models": {"<id>": {"input":..,"cache_write_5m":..,"cache_write_1h":..,"cache_read":..,"output":..}}}
+A model's value may also be a list of such rows each with a "from": "YYYY-MM-DD" key (price changes over time).
+A model in no table is priced at 0 and marked 'unknown-model' in the ledger.
+
+Roles: a project directory matching $USAGE_OVERSEER_RE (default "-wt-<id>$", the worktree-per-initiative layout) is an
+overseer for initiative <id>; a project under /tmp is eval; anything else is interactive. A subagent adds "/subagent"
+and takes its persona from its .meta.json agentType.
+Environment: AGENTS_REPO (repo root; default two levels above this script) · USAGE_STATE (state dir, for a fixture) ·
+CLAUDE_CONFIG_DIR (default ~/.claude). Python 3 standard library only.
+"""
+import collections, csv, datetime, glob, json, os, pathlib, re, sys
+
+REPO = pathlib.Path(os.environ.get("AGENTS_REPO") or pathlib.Path(__file__).resolve().parents[2])
+STATE = pathlib.Path(os.environ.get("USAGE_STATE") or REPO / "agents/state")
+LEDGER = STATE / "usage.tsv"
+PROJECTS = pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path.home() / ".claude") / "projects"
+OVERSEER_RE = re.compile(os.environ.get("USAGE_OVERSEER_RE") or r"-wt-([A-Za-z0-9][A-Za-z0-9-]*)$")
+COLS = ["day", "session", "agent", "project", "role", "initiative", "persona", "model", "cli", "messages",
+        "input", "cache_write_5m", "cache_write_1h", "cache_read", "output", "thinking", "web_search",
+        "list_usd_on_day", "price_basis"]
+NUM = ["messages", "input", "cache_write_5m", "cache_write_1h", "cache_read", "output", "thinking", "web_search"]
+KINDS = ["cache_read", "cache_write_1h", "cache_write_5m", "input", "output"]
+IDLE_MIN = 60  # the 1-hour prompt cache lapses after this many idle minutes
+
+# USD per million tokens. Verify against the vendor's pricing page; override in agents/state/prices.json.
+BUILTIN = {
+    "web_search_per_1k": 10.0,
+    "models": {
+        "claude-opus-5":     {"input": 5.0, "cache_write_5m": 6.25, "cache_write_1h": 10.0, "cache_read": 0.50, "output": 25.0},
+        "claude-opus-4-8":   {"input": 5.0, "cache_write_5m": 6.25, "cache_write_1h": 10.0, "cache_read": 0.50, "output": 25.0},
+        "claude-sonnet-5":   {"input": 2.0, "cache_write_5m": 2.5, "cache_write_1h": 4.0, "cache_read": 0.20, "output": 10.0},
+        "claude-sonnet-4-6": {"input": 3.0, "cache_write_5m": 3.75, "cache_write_1h": 6.0, "cache_read": 0.30, "output": 15.0},
+        "claude-haiku-4-5":  {"input": 1.0, "cache_write_5m": 1.25, "cache_write_1h": 2.0, "cache_read": 0.10, "output": 5.0},
+    },
+    "aliases": {},
+}
+
+
+def load_prices():
+    p = {"web_search_per_1k": BUILTIN["web_search_per_1k"], "models": dict(BUILTIN["models"]), "aliases": dict(BUILTIN["aliases"])}
+    path = pathlib.Path(os.environ.get("USAGE_PRICES") or STATE / "prices.json")
+    try:
+        extra = json.loads(path.read_text(encoding="utf-8"))
+        p["web_search_per_1k"] = extra.get("web_search_per_1k", p["web_search_per_1k"])
+        p["models"].update(extra.get("models") or {})
+        p["aliases"].update(extra.get("aliases") or {})
+    except (OSError, ValueError):
+        pass
+    return p
+
+
+def price_for(prices, model, day):
+    model = prices["aliases"].get(model, model)
+    rows = prices["models"].get(model)
+    if rows is None:
+        rows = prices["models"].get(re.sub(r"-\d{8}$", "", model or ""))  # dated snapshot id -> family id
+    if not rows:
+        return None, "unknown-model"
+    if isinstance(rows, dict):
+        return rows, "list"
+    rows = sorted(rows, key=lambda r: r.get("from", ""))
+    chosen = None
+    for r in rows:
+        if r.get("from", "") <= day:
+            chosen = r
+    return (rows[0], "assumed") if chosen is None else (chosen, "list")
+
+
+def cost(prices, row, day=None):
+    pr, basis = price_for(prices, row["model"], day or row["day"])
+    if pr is None:
+        return 0.0, basis
+    c = (int(row["input"]) * pr["input"] + int(row["cache_write_5m"]) * pr["cache_write_5m"]
+         + int(row["cache_write_1h"]) * pr["cache_write_1h"] + int(row["cache_read"]) * pr["cache_read"]
+         + int(row["output"]) * pr["output"]) / 1e6 + int(row["web_search"]) * prices.get("web_search_per_1k", 0) / 1000
+    return c, basis
+
+
+def classify(path):
+    rel = path.relative_to(PROJECTS)
+    project = rel.parts[0]
+    agent, persona = "main", ""
+    if "subagents" in rel.parts:
+        agent = path.stem
+        meta = path.with_suffix(".meta.json")
+        if meta.exists():
+            try:
+                persona = json.loads(meta.read_text()).get("agentType", "") or ""
+            except Exception:
+                pass
+        persona = persona or "subagent"
+    m = OVERSEER_RE.search(project)
+    if m:
+        role, initiative = "overseer", m.group(1)
+    elif project.startswith("-tmp-"):
+        role, initiative = "eval", ""
+    else:
+        role, initiative = "interactive", ""
+    return project, agent, (role + "/subagent" if agent != "main" else role), initiative, persona
+
+
+def scan_file(path):
+    """-> {(day, session, model): counters}, cli. One count per API message id (content blocks repeat usage)."""
+    seen = {}
+    with open(path, errors="replace") as fh:
+        for line in fh:
+            if '"assistant"' not in line or '"usage"' not in line:
+                continue
+            try:
+                e = json.loads(line)
+            except Exception:
+                continue
+            if e.get("type") != "assistant":
+                continue
+            msg = e.get("message") or {}
+            u = msg.get("usage")
+            mid = msg.get("id") or e.get("requestId") or e.get("uuid")
+            model = msg.get("model")
+            if not u or not model or model == "<synthetic>":
+                continue
+            seen[mid] = (e.get("timestamp", "")[:10], e.get("sessionId", ""), model, e.get("version", ""), u)
+    agg = collections.defaultdict(collections.Counter)
+    cli = {}
+    for day, sid, model, ver, u in seen.values():
+        k = (day, sid, model)
+        cc = u.get("cache_creation") or {}
+        w5, w1 = cc.get("ephemeral_5m_input_tokens"), cc.get("ephemeral_1h_input_tokens")
+        if w5 is None and w1 is None:
+            w5, w1 = u.get("cache_creation_input_tokens", 0) or 0, 0
+        c = agg[k]
+        c["messages"] += 1
+        c["input"] += u.get("input_tokens", 0) or 0
+        c["cache_write_5m"] += w5 or 0
+        c["cache_write_1h"] += w1 or 0
+        c["cache_read"] += u.get("cache_read_input_tokens", 0) or 0
+        c["output"] += u.get("output_tokens", 0) or 0
+        c["thinking"] += (u.get("output_tokens_details") or {}).get("thinking_tokens", 0) or 0
+        c["web_search"] += (u.get("server_tool_use") or {}).get("web_search_requests", 0) or 0
+        if ver:
+            cli[k] = ver
+    return agg, cli
+
+
+def read_ledger():
+    if not LEDGER.exists():
+        return {}
+    rows = {}
+    with open(LEDGER, encoding="utf-8", newline="") as fh:
+        for r in csv.DictReader(fh, delimiter="\t"):
+            rows[(r["day"], r["session"], r["agent"], r["model"])] = r
+    return rows
+
+
+def write_ledger(rows):
+    LEDGER.parent.mkdir(parents=True, exist_ok=True)
+    tmp = LEDGER.with_suffix(".tmp")
+    with open(tmp, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=COLS, delimiter="\t", lineterminator="\n")
+        w.writeheader()
+        for k in sorted(rows):
+            w.writerow({c: rows[k].get(c, "") for c in COLS})
+    tmp.replace(LEDGER)
+
+
+def cmd_scan(_):
+    prices = load_prices()
+    rows = read_ledger()
+    before = len(rows)
+    files = [pathlib.Path(p) for p in glob.glob(str(PROJECTS / "**" / "*.jsonl"), recursive=True)]
+    for f in files:
+        project, agent, role, initiative, persona = classify(f)
+        agg, cli = scan_file(f)
+        for (day, sid, model), c in agg.items():
+            r = {"day": day, "session": sid, "agent": agent, "project": project, "role": role, "initiative": initiative,
+                 "persona": persona, "model": model, "cli": cli.get((day, sid, model), ""), **{n: str(c[n]) for n in NUM}}
+            usd, basis = cost(prices, r)
+            r["list_usd_on_day"], r["price_basis"] = f"{usd:.4f}", basis
+            rows[(day, sid, agent, model)] = r
+    write_ledger(rows)
+    print(f"usage scan: {len(files)} transcripts -> {len(rows)} rows ({len(rows) - before:+d}) -> {LEDGER}")
+
+
+def fmt_tok(n):
+    n = float(n)
+    return f"{n / 1e6:.1f}M" if n >= 1e6 else f"{n / 1e3:.0f}k" if n >= 1e3 else f"{n:.0f}"
+
+
+def cmd_report(argv):
+    prices = load_prices()
+    rows = list(read_ledger().values())
+    if not rows:
+        print("no usage rows - run `usage scan` first")
+        return
+    today = datetime.date.today().isoformat()
+    for r in rows:
+        r["_usd"] = float(r["list_usd_on_day"] or 0)
+        r["_usd_today"] = cost(prices, r, today)[0]
+        pr, _b = price_for(prices, r["model"], r["day"])
+        for k in KINDS:
+            r["_" + k] = int(r[k]) * pr[k] / 1e6 if pr else 0.0
+        r["_in_all"] = int(r["input"]) + int(r["cache_write_5m"]) + int(r["cache_write_1h"]) + int(r["cache_read"])
+
+    def table(title, keyf):
+        g = collections.defaultdict(collections.Counter)
+        for r in rows:
+            k = keyf(r)
+            if k is None:
+                continue
+            c = g[k]
+            c["usd"] += r["_usd"]; c["usd_today"] += r["_usd_today"]; c["msgs"] += int(r["messages"])
+            c["out"] += int(r["output"]); c["read"] += int(r["cache_read"]); c["in_all"] += r["_in_all"]
+            c["d_read"] += r["_cache_read"]; c["d_write"] += r["_cache_write_5m"] + r["_cache_write_1h"]
+            c["d_in"] += r["_input"]; c["d_out"] += r["_output"]
+        out = [f"\n### {title}\n", "| key | list $ on day | list $ at today's prices | messages | output tok | out/msg | cache-hit % | $ cache read | $ cache write | $ input | $ output |",
+               "|---|---|---|---|---|---|---|---|---|---|---|"]
+        for k, c in sorted(g.items(), key=lambda kv: -kv[1]["usd"]):
+            hit = 100 * c["read"] / c["in_all"] if c["in_all"] else 0
+            out.append(f"| {k} | {c['usd']:.2f} | {c['usd_today']:.2f} | {c['msgs']} | {fmt_tok(c['out'])} | {c['out'] / max(1, c['msgs']):.0f} | "
+                       f"{hit:.1f} | {c['d_read']:.2f} | {c['d_write']:.2f} | {c['d_in']:.2f} | {c['d_out']:.2f} |")
+        return "\n".join(out)
+
+    tot = sum(r["_usd"] for r in rows)
+    unk = sorted({r["model"] for r in rows if r["price_basis"] == "unknown-model"})
+    days = sorted({r["day"] for r in rows})
+    parts = [f"## Usage and cost (agents/bin/usage, {datetime.datetime.now().isoformat(timespec='minutes')})\n",
+             f"API-equivalent list cost over {days[0]} to {days[-1]}: **${tot:.2f}** across {len(rows)} rows. "
+             "A measure of work for comparing roles, personas and models - not a bill."
+             + (f" Unpriced models (add them to agents/state/prices.json): {', '.join(unk)}." if unk else ""),
+             table("By role", lambda r: r["role"]),
+             table("By persona (subagents)", lambda r: r["persona"] or None),
+             table("By model", lambda r: r["model"]),
+             table("By initiative (overseer runs incl. their subagents)", lambda r: r["initiative"] or None),
+             table("By day (last 14)", lambda r: r["day"] if r["day"] in days[-14:] else None)]
+    print("\n".join(parts) + "\n")
+
+
+def own_session_id():
+    """The session id of the Claude process above us, via the session registry (state/sessions/<sid>.json holds its pid)."""
+    reg = {}
+    for f in glob.glob(str(STATE / "sessions" / "*.json")):
+        try:
+            j = json.loads(pathlib.Path(f).read_text())
+            reg[int(j.get("pid") or 0)] = j["session_id"]
+        except Exception:
+            pass
+    pid = os.getppid()
+    for _ in range(12):
+        if pid in reg:
+            return reg[pid]
+        try:
+            pid = int(open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()[1])
+        except Exception:
+            break
+        if pid <= 1:
+            break
+    return None
+
+
+def newest_here():
+    """Session id of the newest transcript under this directory's project folder (the last resort)."""
+    slug = re.sub(r"[^A-Za-z0-9]", "-", str(pathlib.Path.cwd()))
+    files = sorted(glob.glob(str(PROJECTS / slug / "*.jsonl")), key=os.path.getmtime)
+    return pathlib.Path(files[-1]).stem if files else None
+
+
+def cmd_session(argv):
+    sid = argv[0] if argv else (os.environ.get("CLAUDE_CODE_SESSION_ID") or own_session_id() or newest_here())
+    if not sid:
+        print("usage session: could not tell which session this is - pass the session id")
+        sys.exit(1)
+    mains = glob.glob(str(PROJECTS / "*" / f"{sid}.jsonl"))
+    subs = glob.glob(str(PROJECTS / "*" / sid / "subagents" / "*.jsonl"))
+    if not mains:
+        print(f"usage session: no transcript for {sid}")
+        sys.exit(1)
+    prices = load_prices()
+    today = datetime.date.today().isoformat()
+    kind_usd = collections.Counter()
+
+    def total(files):
+        t, usd, models = collections.Counter(), 0.0, collections.Counter()
+        for f in files:
+            agg, _ = scan_file(pathlib.Path(f))
+            for (day, _s, model), c in agg.items():
+                t.update(c)
+                models[model] += c["messages"]
+                usd += cost(prices, {"model": model, **{n: c[n] for n in NUM}}, day or today)[0]
+                pr, _b = price_for(prices, model, day or today)
+                if pr:
+                    for k in KINDS:
+                        kind_usd[k] += c[k] * pr[k] / 1e6
+                kind_usd["web_search"] += c["web_search"] * prices.get("web_search_per_1k", 0) / 1000
+        return t, usd, models
+
+    m, musd, mmodels = total(mains)
+    s, susd, _ = total(subs)
+    turns = {}
+    for line in open(mains[0], errors="replace"):
+        if '"assistant"' not in line or '"usage"' not in line:
+            continue
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue
+        if e.get("type") != "assistant" or e.get("isSidechain"):
+            continue
+        u = (e.get("message") or {}).get("usage") or {}
+        mid = (e.get("message") or {}).get("id") or e.get("uuid")
+        ctx = (u.get("input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0)
+        turns[mid] = (e.get("timestamp", ""), ctx, u.get("cache_creation_input_tokens") or 0, (e.get("message") or {}).get("model"))
+    seq = sorted(turns.values())
+    ts = [datetime.datetime.fromisoformat(t[0].replace("Z", "+00:00")) for t in seq if t[0]]
+    resumes, rew_tok, rew_usd = 0, 0, 0.0
+    for i in range(1, len(seq)):
+        if ts[i] - ts[i - 1] > datetime.timedelta(minutes=IDLE_MIN) and seq[i][2] > 20000:
+            resumes += 1
+            rew_tok += seq[i][2]
+            pr, _ = price_for(prices, seq[i][3], today)
+            if pr:
+                rew_usd += seq[i][2] * pr["cache_write_1h"] / 1e6
+    span = (ts[-1] - ts[0]) if ts else datetime.timedelta(0)
+    allt, usd = m + s, musd + susd
+    print(f"Session {sid[:8]} - {span.seconds // 3600 + span.days * 24}h{span.seconds // 60 % 60:02d}m, "
+          f"{m['messages']} API calls ({', '.join(mmodels)}), {len(subs)} subagents")
+    print(f"  Cost (API list-price equivalent, not a bill): ${usd:.2f}  (main ${musd:.2f}, subagents ${susd:.2f})")
+    label = {"cache_read": "cache read", "cache_write_1h": "cache write 1h", "cache_write_5m": "cache write 5m",
+             "input": "fresh input", "output": "output", "web_search": "web search"}
+    print(f"  {'kind':<15}{'tokens':>8}{'cost':>9}{'share':>7}")
+    for k in KINDS + ["web_search"]:
+        if not allt[k] and not kind_usd[k]:
+            continue
+        n = f"{allt[k]}" if k == "web_search" else fmt_tok(allt[k])
+        print(f"  {label[k]:<15}{n:>8}{'$%.2f' % kind_usd[k]:>9}{(100 * kind_usd[k] / usd if usd else 0):>6.0f}%")
+    if allt["thinking"]:
+        print(f"  (output includes {fmt_tok(allt['thinking'])} thinking)")
+    if seq:
+        print(f"  Context: {fmt_tok(seq[-1][1])} now, {fmt_tok(max(t[1] for t in seq))} peak")
+    print(f"  Idle re-writes (>{IDLE_MIN} min gap): {resumes}" + (f" - {fmt_tok(rew_tok)} tokens, ~${rew_usd:.2f}" if resumes else ""))
+
+
+def cmd_price(_):
+    prices = load_prices()
+    for mdl, rows in prices["models"].items():
+        for r in ([rows] if isinstance(rows, dict) else rows):
+            print(f"{mdl:22} from {r.get('from', '-'):10}  in {r['input']:>6}  w5m {r['cache_write_5m']:>6}  w1h {r['cache_write_1h']:>6}  "
+                  f"read {r['cache_read']:>5}  out {r['output']:>6}")
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:]
+    if not a or a[0] in ("-h", "--help"):
+        print(__doc__)
+        sys.exit(0)
+    {"scan": cmd_scan, "report": cmd_report, "session": cmd_session, "price": cmd_price}.get(a[0], lambda _: (print(__doc__), sys.exit(1)))(a[1:])

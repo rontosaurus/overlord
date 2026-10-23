@@ -1,0 +1,4 @@
+# Drift log — one line per deviation from the framework, appended by agents/bin/drift.
+# Format: timestamp | kind | initiative | message
+# kinds: routing-bypass | waived-F | attestation-fail | hook-block:<gate> | gate-skipped | other
+# (initiative is "-" when none applies). Append-only; the framework review reads it.

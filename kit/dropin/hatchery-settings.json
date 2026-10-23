@@ -1,0 +1,48 @@
+{
+  "extraKnownMarketplaces": {
+    "hatchery": {
+      "source": {
+        "source": "directory",
+        "path": "@KIT@"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "hatchery@hatchery": false
+  },
+  "env": {
+    "AGENTS_REPO": "@REPO@"
+  },
+  "permissions": {
+    "deny": [
+      "Edit(~/.claude/settings.json)",
+      "Write(~/.claude/settings.json)",
+      "Edit(~/.claude/settings.local.json)",
+      "Write(~/.claude/settings.local.json)",
+      "Edit(~/.claude/plugins/**)",
+      "Write(~/.claude/plugins/**)",
+      "Edit(@KITDENY@/plugin/hooks/**)",
+      "Write(@KITDENY@/plugin/hooks/**)",
+      "Edit(@REPODENY@/agents/state/ceiling.json)",
+      "Write(@REPODENY@/agents/state/ceiling.json)",
+      "Edit(@REPODENY@/agents/guard.conf)",
+      "Write(@REPODENY@/agents/guard.conf)",
+      "Edit(@REPODENY@/agents/estate.env)",
+      "Write(@REPODENY@/agents/estate.env)",
+      "Edit(@REPODENY@/agents/bin/**)",
+      "Write(@REPODENY@/agents/bin/**)",
+      "Edit(@REPODENY@/agents/senses.d/**)",
+      "Write(@REPODENY@/agents/senses.d/**)",
+      "Edit(@REPODENY@/agents/prompts/**)",
+      "Write(@REPODENY@/agents/prompts/**)",
+      "Edit(@REPODENY@/.claude/**)",
+      "Write(@REPODENY@/.claude/**)",
+      "Edit(~/.config/systemd/**)",
+      "Edit(~/.claude.json)",
+      "Edit(@REPODENY@/agents/state/costs.tsv)",
+      "Write(~/.config/systemd/**)",
+      "Write(~/.claude.json)",
+      "Write(@REPODENY@/agents/state/costs.tsv)"
+    ]
+  }
+}

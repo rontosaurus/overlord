@@ -1,0 +1,7 @@
+agents/estate.env
+agents/state/sessions/
+agents/state/runs/*.err
+agents/state/board/
+agents/state/usage.tsv
+agents/state/runs/
+agents/state/senses.tsv

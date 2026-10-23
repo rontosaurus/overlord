@@ -1,0 +1,9 @@
+[Unit]
+Description=Governor weekly hour - Sunday evening
+
+[Timer]
+OnCalendar=Sun *-*-* 19:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

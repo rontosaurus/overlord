@@ -1,0 +1,35 @@
+# Copy to agents/guard.conf in this repo. The plugin's hooks read THIS repo's agents/guard.conf
+# (via AGENTS_REPO), never a copy inside the plugin. The file is parsed, never executed: KEY='value'
+# lines only, no variables or substitutions. Patterns are extended regular expressions joined with "|".
+#
+# Two lists. DENY = refused in every session, whatever the mode (H1, H2, H4_NEVER_PATHS below, and the
+# permission deny rules in settings). ASK = "owner's hand": in a session you are sitting in, the agent gets a
+# permission prompt and your answer is the go for exactly that command; an unattended run (AGENT_ROLE set)
+# is refused and has to stage the action for you. The ask shapes the hooks know without config: host
+# reboot/power-off, storage-layout tools, recursive rm on system paths, helm uninstall, kubectl delete of
+# anything but a pod or job, force pushes, git history rewrites, deleting/resetting the main branch.
+
+# H1 (deny) - any command matching these is blocked in every session (case-insensitive; also checked on MCP
+# tool calls and WebFetch). Put here the people or shared
+# channels that must NEVER receive an automated message: a person's device name, a broadcast
+# target, a shared group channel. Never put a secret here.
+# Pick identifiers that appear only in a send (a device name, a channel id). A bare first name
+# also blocks reading commands and file paths that merely mention the person - by design, but you
+# will feel it.
+H1_PATTERNS='<never-message-this-person>|<other-shared-channel>'
+
+# H4_NEVER_PATHS (deny) - folders whose contents an agent may never delete, in any mode, not even with your
+# tap: `rm -r` or `find ... -delete` naming one is blocked. Photos, documents, finance, anything you keep
+# the only copy of. Empty = off. LIMIT: it matches paths NAMED in the command (`rm -rf /path/to/photos/x`,
+# `find /path/to/photos -delete`). It does NOT see `cd /path/to/photos && rm -rf *`, a glob that expands
+# to the folder, or a deletion made from inside a script or interpreter. Keep real backups of these folders.
+H4_NEVER_PATHS='/path/to/photos|/path/to/documents|_keep'
+
+# H4_PROVIDER_HOSTS (ask) - hosts whose API changes state you cannot undo (DNS provider, registrar). A
+# write call (POST/PUT/PATCH/DELETE, --data) to one asks you when you are at the keyboard and is refused
+# in an unattended run. Reads pass.
+H4_PROVIDER_HOSTS='api.dns-provider.example'
+
+# H4_ASK_PATTERNS (ask) - your own "my hand" commands, as one regular expression: a deploy script, a
+# production cluster, a particular namespace. Same behaviour as above. Empty = only the built-in shapes.
+H4_ASK_PATTERNS='deploy-to-prod|kubectl[^;&|]* -n production'

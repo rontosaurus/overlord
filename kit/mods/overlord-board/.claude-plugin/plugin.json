@@ -1,0 +1,1 @@
+{ "name": "overlord-board", "version": "0.1.0", "description": "Your work board above the prompt and a /board pane: now, your priorities, alarms, tick and spend, read from the local board.json that agents/bin/board writes (zero model tokens)", "types": "./types/index.d.ts" }

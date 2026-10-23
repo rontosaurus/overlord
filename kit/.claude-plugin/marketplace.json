@@ -1,0 +1,12 @@
+{
+  "name": "hatchery",
+  "owner": { "name": "rontosaurus" },
+  "description": "One person's kit for running personal infrastructure with Claude Code: a delegating overlord, reviewer personas, and hook gates.",
+  "plugins": [
+    {
+      "name": "hatchery",
+      "source": "./plugin",
+      "description": "An overlord that delegates to subagents, reviewer personas, and hook gates that block dangerous commands."
+    }
+  ]
+}

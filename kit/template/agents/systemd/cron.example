@@ -1,0 +1,11 @@
+# Alternative to systemd timers: add with `crontab -e` (as the user that owns the repo). Edit <repo-path>.
+# Daily tick at 06:00 local time; weekly hour Sunday 19:00. cron has a minimal PATH: set it so `claude` is found.
+PATH=/usr/local/bin:/usr/bin:/bin:<home-dir>/.local/bin
+AGENTS_REPO=<repo-path>
+# What runs and who gets told are set here, never in ceiling.json:
+HATCHERY_CLAUDE_BIN=<home-dir>/.local/bin/claude
+# HATCHERY_CLAUDE_ARGS=--permission-mode acceptEdits
+# (the crontab itself must not be editable by the agent: the Bash hook refuses `crontab` writes, but make it yours)
+# HATCHERY_NOTIFY_CMD=<a command that only ever reaches you; called as: <cmd> "<title>" "<body>">
+0 6 * * *   mkdir -p <repo-path>/agents/state/runs && cd <repo-path> && agents/bin/tick        >> agents/state/runs/cron.log 2>&1
+0 19 * * 0  mkdir -p <repo-path>/agents/state/runs && cd <repo-path> && agents/bin/tick weekly >> agents/state/runs/cron.log 2>&1

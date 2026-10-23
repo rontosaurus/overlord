@@ -1,0 +1,763 @@
+#!/usr/bin/env python3
+"""board — render the overlord's state as a local, read-only work board (page + JSON + a four-line band).
+
+A PROJECTION of agents/state/overlord.md (plus, when present, next.md, priorities.md, threads.md, arc.md,
+activity.tsv, costs.tsv, runs/), never a tracker: it reads, it never writes state. Local only: no server,
+no network, no login. Open the page with a browser (file://), or read board.json.
+
+  board                      render into <repo>/agents/state/board/ (index.html, board.json, files/)
+  board --out DIR            render into DIR instead (created; refused if DIR is non-empty and not ours)
+  board --out DIR --json     also print the model to stdout
+  board --band               four plain-text lines (now / asks / ran / tick) for a status line or the mod
+  options: --repo PATH (repo root; default $AGENTS_REPO, else two levels above this script), --now ISO (test clock)
+
+Exit: 0 clean render · 2 rendered, but a section failed to parse (the page carries a banner naming it) ·
+1 could not render at all. `--band` always exits 0. Python 3 standard library only.
+
+Every optional file may be missing: the matching pane says "no <file> yet" and nothing fails.
+Formats (all Markdown tables, first row = header, matched by column NAME so extra columns are fine):
+  overlord.md    "## Open initiatives" (id, goal, brief, branch, status, opened) · "## Ask the owner ..." (#, action
+                 staged, why, staged where, go, opened — an ask is open until its go cell has text) ·
+                 "## Recently closed" (id, outcome, attestations verified, closed) · "## Last wake" (first line)
+  next.md        line 1 "updated YYYY-MM-DD HH:MM"; then "now · ...", "on deck · ...", "week · ..." lines
+  priorities.md  columns: # | slot | what | why | next (who) | since | source   (slot: tap reply at-pc evening decide)
+  threads.md     columns: thread | waiting on | since | how to check | tag        (tag "owner" = waiting on you)
+  arc.md         "## Specs" (and optional "## Outside the phases") table: spec | status | owner | initiatives |
+                 last moved | alarms ; optional "## Moved since" bullets
+  activity.tsv   ts <TAB> who <TAB> initiative <TAB> what <TAB> undo <TAB> proof     (the action log)
+  costs.tsv      ts, id, model, turns, cost_usd, duration_s, subtype, origin          (origin "unattended" binds)
+  ceiling.json   {"daily_usd": N, "daily_turns": N}
+  runs/<id>.pid + runs/<id>.json (live overseer), runs/tick.json ({"finished","mode","result":{"subtype"}}; else the newest tick row of costs.tsv)
+"""
+import argparse, base64, datetime as dt, hashlib, html, json, os, re, stat, sys, unicodedata
+
+try:
+    import fcntl  # POSIX only; the render lock is skipped where it is missing
+except ImportError:  # pragma: no cover
+    fcntl = None
+
+IDLE_DAYS = 3
+ACTIVITY_HOURS = 24
+ACTIVITY_LIMIT = 40
+HISTORY_LIMIT = 60
+WITHHELD = "[withheld - secret-shaped text]"
+SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+STRAT_SLOTS = ("tap", "reply", "at-pc", "evening", "decide")
+OWNER_NEXT = re.compile(r"\b(?:owner|you|your)\s+next\b|\bowner:", re.I)
+ACT_COLS = ["ts", "who", "initiative", "what", "undo", "proof"]
+OPEN_FLAGS = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+
+# Secret shapes: keyword=value, private-key header, common provider key prefixes, long mixed tokens, bearer headers.
+SECRET_RE = re.compile(
+    r"(?:api[_-]?key|secret|token|passw(?:or)?d|credential)s?\s*[:=]\s*[\"']?[A-Za-z0-9/+_.=-]{12,}"
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{20,}|\bsk-[A-Za-z0-9_-]{20,}"
+    r"|\bBearer\s+[A-Za-z0-9._~+/=-]{16,}"
+    r"|\b(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{40,}\b", re.I)
+
+
+def secretish(text):
+    return bool(SECRET_RE.search(text))
+
+
+# ---------- small helpers ----------
+def plain(s):
+    return re.sub(r"[*`]", "", s or "")
+
+
+def shorten(s, n):
+    s = plain(s)
+    return s if len(s) <= n else s[:n].rsplit(" ", 1)[0] + " ..."
+
+
+def inline(s):
+    s = html.escape(s, quote=False)
+    s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
+    return re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
+
+
+def parse_date(s):
+    m = re.search(r"(\d{4}-\d{2}-\d{2})(?:[ T~]+(\d{1,2}):(\d{2}))?", s or "")
+    if not m:
+        return None
+    try:
+        d = dt.datetime.strptime(m.group(1), "%Y-%m-%d")
+    except ValueError:
+        return None
+    return d.replace(hour=int(m.group(2)), minute=int(m.group(3))) if m.group(2) else d
+
+
+def age_days(d, now):
+    return None if d is None else max(0, (now.replace(tzinfo=None) - d).days)
+
+
+def read_regular(path, cap=65536):
+    """Text of a regular, non-symlink file (<= cap bytes), or None."""
+    try:
+        fd = os.open(path, os.O_RDONLY | OPEN_FLAGS)
+        with os.fdopen(fd, encoding="utf-8", errors="replace") as fh:
+            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                return None
+            return fh.read(cap)
+    except OSError:
+        return None
+
+
+BIG = 64 << 20
+
+
+def rtext(path, cap=BIG):
+    """read_regular, but raising OSError when the file is missing / not a regular file / a symlink (callers already catch OSError)."""
+    t = read_regular(path, cap)
+    if t is None:
+        raise OSError("not a readable regular file: %s" % path)
+    return t
+
+
+def jload(path):
+    return json.loads(rtext(path, 1 << 20))
+
+
+def clean_line(s):
+    """No terminal escapes or invisible format characters from file-written text."""
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Cf")
+    return re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", s)
+
+
+# ---------- markdown tables ----------
+def split_row(l):
+    s = l.strip().strip("|").replace("\\|", "\x00")
+    return [c.strip().replace("\x00", "|") for c in s.split("|")]
+
+
+def md_sections(text):
+    out, cur = {"": (0, [])}, ""
+    for i, l in enumerate(text.split("\n"), 1):
+        if l.startswith("## "):
+            cur = l[3:].strip()
+            out[cur] = (i, [])
+        else:
+            out[cur][1].append((i, l))
+    return out
+
+
+def sec(secs, prefix):
+    k = next((k for k in secs if k and k.lower().startswith(prefix.lower())), None)
+    return secs[k] if k else None
+
+
+def table(name, lines, head_line, errors, must):
+    """First table in `lines` -> list of dicts keyed by lower-cased header. `must` = column names that have to exist
+    (a prefix match is enough: 'go' finds 'go (who / when)'). Blank placeholder rows are dropped."""
+    rows = [(n, l) for n, l in lines if l.lstrip().startswith("|")]
+    if len(rows) < 2:
+        errors.append({"section": name, "line": head_line, "msg": "no table found"})
+        return []
+    hn, hl = rows[0]
+    header = [c.lower() for c in split_row(hl)]
+    miss = [m for m in must if not any(h == m or h.startswith(m) for h in header)]
+    if miss:
+        errors.append({"section": name, "line": hn, "msg": "table has no '%s' column" % "', '".join(miss)})
+        return []
+    out = []
+    for n, l in rows[2:]:
+        c = split_row(l)
+        if len(c) != len(header):
+            errors.append({"section": name, "line": n, "msg": "row has %d cells, expected %d (unescaped '|' in a cell?)" % (len(c), len(header))})
+            continue
+        if not any(x.strip(" -") for x in c):
+            continue
+        out.append(dict(zip(header, c), _line=n))
+    return out
+
+
+def col(row, *names):
+    """Cell by column name; a prefix of the header counts ('go' -> 'go (who / when)')."""
+    for n in names:
+        for k, v in row.items():
+            if k == n or (not k.startswith("_") and k.startswith(n)):
+                return v
+    return ""
+
+
+# ---------- state ----------
+def parse_overlord(text, errors):
+    secs = md_sections(text)
+    out = {"last_wake": "", "inits": [], "asks": [], "closed": []}
+    for key, prefix, must in (("inits", "Open initiatives", ["id"]), ("asks", "Ask", ["#"]), ("closed", "Recently closed", ["id"])):
+        s = sec(secs, prefix)
+        if s is None:
+            errors.append({"section": prefix, "line": 0, "msg": "section heading missing"})
+            continue
+        out[key] = table(prefix, s[1], s[0], errors, must)
+    s = sec(secs, "Last wake")
+    if s:
+        out["last_wake"] = next((plain(l).strip() for _, l in s[1] if l.strip()), "")
+    else:
+        errors.append({"section": "Last wake", "line": 0, "msg": "section heading missing"})
+    return out
+
+
+def pid_alive(runs, id_):
+    """A live overseer = a pid file whose pid is running and whose run json has no 'finished'."""
+    try:
+        with open(os.path.join(runs, id_ + ".pid")) as fh:
+            pid = int(fh.read().strip())
+    except (OSError, ValueError):
+        return None
+    meta = {}
+    try:
+        meta = jload(os.path.join(runs, id_ + ".json"))
+    except (OSError, ValueError):
+        pass
+    if meta.get("finished"):
+        return None
+    try:
+        if os.path.isdir("/proc"):
+            alive = os.path.isdir("/proc/%d" % pid)
+        else:
+            os.kill(pid, 0)
+            alive = True
+    except OSError:
+        alive = False
+    return {"pid": pid, "started": meta.get("started")} if alive else None
+
+
+def read_tick(st):
+    """runs/tick.json if a tick wrote one, else the newest costs.tsv row whose id is tick*; None when neither exists."""
+    try:
+        j = jload(os.path.join(st, "runs", "tick.json"))
+        return {"finished": str(j.get("finished") or ""), "mode": str(j.get("mode") or "?"),
+                "subtype": str((j.get("result") or {}).get("subtype") or "?")}
+    except (OSError, ValueError, AttributeError):
+        pass
+    mode = "?"
+    try:
+        mode = str(jload(os.path.join(st, "ceiling.json")).get("tick_mode") or "?")
+    except (OSError, ValueError, AttributeError):
+        pass
+    last = None
+    try:
+        for i, l in enumerate(rtext(os.path.join(st, "costs.tsv")).split("\n")):
+            c = l.rstrip("\n").split("\t")
+            if i and len(c) >= 7 and c[1].startswith("tick"):
+                last = c
+    except OSError:
+        pass
+    return {"finished": last[0], "mode": mode, "subtype": last[6]} if last else None
+
+
+def limits(st):
+    """WIP limits from ceiling.json (wip_initiatives / ask_backpressure); the mod reads them from board.json."""
+    try:
+        cfg = jload(os.path.join(st, "ceiling.json"))
+        return {"wip_initiatives": int(cfg.get("wip_initiatives") or 0) or None, "ask_backpressure": int(cfg.get("ask_backpressure") or 0) or None}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {"wip_initiatives": None, "ask_backpressure": None}
+
+
+def read_activity(path, errors):
+    rows = []
+    try:
+        lines = rtext(path).split("\n")
+    except OSError:
+        return rows
+    for n, l in enumerate(lines, 1):
+        if (n == 1 and l.startswith("ts\t")) or not l.strip():
+            continue
+        c = l.split("\t")
+        try:
+            if len(c) != len(ACT_COLS):
+                raise ValueError("fields")
+            ts = dt.datetime.fromisoformat(c[0]).replace(tzinfo=None)
+        except ValueError:
+            errors.append({"section": "activity.tsv", "line": n, "msg": "malformed row skipped"})
+            continue
+        rows.append(dict(zip(ACT_COLS, c), ts=ts, _line=n))
+    return rows
+
+
+def ceiling(st, now):
+    """Today's unattended spend against ceiling.json, from costs.tsv. None when either file is absent."""
+    try:
+        cfg = jload(os.path.join(st, "ceiling.json"))
+        usd_c, turns_c = float(cfg["daily_usd"]), float(cfg.get("daily_turns") or 0)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    day, uu, ut, au = now.strftime("%Y-%m-%d"), 0.0, 0.0, 0.0
+    try:
+        for i, l in enumerate(rtext(os.path.join(st, "costs.tsv")).split("\n")):
+            c = l.rstrip("\n").split("\t")
+            if i == 0 or len(c) < 5 or c[0][:10] != day:
+                continue
+            try:
+                cost, turns = float(c[4] or 0), float(c[3] or 0)
+            except ValueError:
+                continue
+            if len(c) >= 8 and c[7] == "unattended":
+                uu, ut = uu + cost, ut + turns
+            else:
+                au += cost
+    except OSError:
+        pass
+    return {"date": day, "usd_used": round(uu, 4), "usd_ceiling": usd_c, "turns_used": ut, "turns_ceiling": turns_c,
+            "spent": uu >= usd_c or (turns_c > 0 and ut >= turns_c), "attended_usd": round(au, 4)}
+
+
+def file_times(st, id_):
+    """Newest mtime of anything on disk that names this id: its brief, its reports, its run files."""
+    ts = []
+    for d, match in (("briefs", lambda f: f.startswith(id_ + ".")), ("reports", lambda f: f.startswith(id_ + "-")),
+                     ("runs", lambda f: f.startswith(id_))):
+        try:
+            for f in os.listdir(os.path.join(st, d)):
+                if match(f):
+                    ts.append(os.stat(os.path.join(st, d, f)).st_mtime)
+        except OSError:
+            pass
+    return dt.datetime.fromtimestamp(max(ts)) if ts else None
+
+
+# ---------- strategist files ----------
+def read_strategist(st, now, errors, publish, card):
+    out = {"next": None, "priorities": [], "threads": [], "arc": [], "outside": [], "moved": [], "have": {}}
+    t = read_regular(os.path.join(st, "next.md"))
+    out["have"]["next.md"] = t is not None
+    if t is not None:
+        n = {"updated": None, "age_days": None, "age_hours": 0, "now": "", "deck": "", "week": ""}
+        for l in t.split("\n"):
+            m = re.match(r"^\W*(now|on deck|week)\s*[·:\-—]\s*(.*)$", l.strip(), re.I)
+            if m:
+                n[{"now": "now", "on deck": "deck", "week": "week"}[m.group(1).lower()]] = clean_line(m.group(2).strip()[:160])
+        d = parse_date(t.split("\n", 1)[0])
+        if d:
+            n["updated"], n["age_days"] = d.strftime("%Y-%m-%d %H:%M"), age_days(d, now)
+            n["age_hours"] = max(0, int((now.replace(tzinfo=None) - d).total_seconds() // 3600))
+        if not (n["now"] or n["deck"] or n["week"]):
+            errors.append({"section": "next.md", "line": 0, "msg": "no 'now · / on deck · / week ·' lines found"})
+        else:
+            out["next"] = n
+    for fname, key, must in (("priorities.md", "priorities", ["slot", "what"]), ("threads.md", "threads", ["thread"])):
+        t = read_regular(os.path.join(st, fname))
+        out["have"][fname] = t is not None
+        if t is None:
+            continue
+        rows = table(fname, list(enumerate(t.split("\n"), 1)), 1, errors, must)
+        if key == "priorities":
+            keep = []
+            for r in rows:
+                if plain(r.get("slot", "")).strip().lower() in STRAT_SLOTS:
+                    keep.append(r)
+                else:
+                    errors.append({"section": fname, "line": r["_line"], "msg": "slot must be one of %s" % ", ".join(STRAT_SLOTS)})
+            rows = keep
+        out[key] = rows
+    t = read_regular(os.path.join(st, "arc.md"))
+    out["have"]["arc.md"] = t is not None
+    if t is not None:
+        secs = md_sections(t)
+        s = sec(secs, "Specs")
+        if s:
+            out["arc"] = table("arc.md § Specs", s[1], s[0], errors, ["spec"])
+        s = sec(secs, "Outside")
+        if s:
+            out["outside"] = table("arc.md § Outside", s[1], s[0], errors, ["spec"])
+        s = sec(secs, "Moved since")
+        out["moved"] = [clean_line(l[2:].strip()) for _, l in (s[1] if s else []) if l.startswith("- ")][:10]
+    return out
+
+
+def scrub(obj):
+    if isinstance(obj, str):
+        return WITHHELD if secretish(obj) else clean_line(obj)
+    if isinstance(obj, list):
+        return [scrub(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: (v if k.startswith("_") else scrub(v)) for k, v in obj.items()}
+    return obj
+
+
+# ---------- model ----------
+def build(repo, now):
+    errors = []
+    st = os.path.join(repo, "agents/state")
+    text = read_regular(os.path.join(st, "overlord.md"), cap=1 << 20)
+    if text is None:
+        errors.append({"section": "overlord.md", "line": 0, "msg": "cannot read agents/state/overlord.md"})
+    parsed = parse_overlord(text, errors) if text else {"last_wake": "", "inits": [], "asks": [], "closed": []}
+    runs = os.path.join(st, "runs")
+    files = {}  # relpath under the out dir -> text
+
+    def publish(kind, name, c, label, srcdir=None):
+        """Copy a brief/report next to the page as plain text, secret-scanned. Returns a link dict or None."""
+        if not SAFE_NAME.match(name):
+            return None
+        body = read_regular(os.path.join(st, srcdir or kind, name), cap=1 << 20)
+        if body is None:
+            return None
+        if secretish(body):
+            c["withheld"] = True
+            return {"label": label, "href": None}
+        if srcdir:
+            c["_body"] = body
+        rel = "files/%s/%s" % (kind, name)
+        files[rel] = body
+        return {"label": label, "href": rel}
+
+    def card(col_, id_, title, status, **kw):
+        c = {"col": col_, "id": id_, "title": title, "status": status, "links": [], "touched": None, "touched_days": None, "age": None, "stale": False}
+        c.update(kw)
+        return c
+
+    acts_all = read_activity(os.path.join(st, "activity.tsv"), errors)
+    act_by_id = {}
+    for r in acts_all:
+        if r["initiative"] not in act_by_id or r["ts"] > act_by_id[r["initiative"]]:
+            act_by_id[r["initiative"]] = r["ts"]
+    nn = now.replace(tzinfo=None)
+    cards, tri_cards = [], []
+
+    for r in parsed["inits"]:
+        id_ = plain(col(r, "id")).strip()
+        status = col(r, "status") or col(r, "goal")
+        opened = parse_date(col(r, "opened", "dispatched"))
+        live = pid_alive(runs, id_)
+        c = card("running" if live else "open", id_, id_, status, goal=shorten(col(r, "goal"), 120), branch=shorten(col(r, "branch"), 60),
+                 live=live, age=age_days(opened, now), age_label="opened", line=r["_line"])
+        for sub, nm in (("briefs", id_ + ".md"),):
+            if os.path.exists(os.path.join(st, sub, nm)):
+                l = publish(sub, nm, c, "brief")
+                if l:
+                    c["links"].append(l)
+        try:
+            reps = sorted(f for f in os.listdir(os.path.join(st, "reports")) if f.startswith(id_ + "-") and f.endswith(".md"))[-2:]
+        except OSError:
+            reps = []
+        for rp in reps:
+            l = publish("reports", rp, c, "report")
+            if l:
+                c["links"].append(l)
+        newest = max([x for x in (file_times(st, id_), act_by_id.get(id_), opened) if x], default=None)
+        c["touched"] = newest.strftime("%Y-%m-%d") if newest else None
+        c["touched_days"] = age_days(newest, now)
+        c["stale"] = bool(c["touched_days"] is not None and c["touched_days"] >= IDLE_DAYS)
+        cards.append(c)
+        tri_cards.append({"id": id_, "kind": "init", "lane": "waiting" if OWNER_NEXT.search(plain(status)) else "inflight",
+                          "text": shorten(status, 220), "idle": c["touched_days"], "live": bool(live)})
+    for r in parsed["asks"]:
+        num = plain(col(r, "#")).strip()
+        go = plain(col(r, "go")).strip()
+        answered = bool(go) and not re.match(r"^(—|-|–|none|pending|open|n/?a|\?)$", go, re.I)
+        d = parse_date(col(r, "opened", "asked"))
+        what = col(r, "action staged") or col(r, "what")
+        c = card("waiting", "#" + num, "#%s" % num, what, answered=answered, age=age_days(d, now), age_label="asked", line=r["_line"],
+                 staged_where=shorten(col(r, "staged where"), 160), why=shorten(col(r, "why"), 200),
+                 touched=d.strftime("%Y-%m-%d") if d else None, touched_days=age_days(d, now))
+        c["stale"] = bool(c["touched_days"] is not None and c["touched_days"] >= IDLE_DAYS and not answered)
+        cards.append(c)
+        if not answered:
+            tri_cards.append({"id": "#" + num, "kind": "ask", "lane": "waiting", "text": shorten(what, 220), "idle": c["touched_days"], "live": False})
+    for r in parsed["closed"]:
+        id_ = plain(col(r, "id")).strip()
+        d = parse_date(col(r, "closed"))
+        c = card("closed", id_, id_, col(r, "outcome"), age=age_days(d, now), age_label="closed", line=r["_line"],
+                 touched=d.strftime("%Y-%m-%d") if d else None, touched_days=age_days(d, now))
+        cards.append(c)
+    # History: every report ever filed (<id>-YYYYMMDD-HHMM.md)
+    try:
+        rep_names = sorted(os.listdir(os.path.join(st, "reports")))
+    except OSError:
+        rep_names = []
+    for fn in rep_names:
+        m = re.match(r"^(.+)-(\d{8}-\d{4})\.md$", fn)
+        if not m:
+            continue
+        try:
+            d = dt.datetime.strptime(m.group(2), "%Y%m%d-%H%M")
+        except ValueError:
+            continue
+        hc = card("history", m.group(1), m.group(1), "report filed", spec="reports/%s" % fn, touched=d.strftime("%Y-%m-%d"), touched_days=age_days(d, now))
+        l = publish("reports", fn, hc, "report")
+        if l:
+            hc["links"].append(l)
+        cards.append(hc)
+    # Autonomous: what ran unattended in the last ACTIVITY_HOURS (activity.tsv), newest first, + the newest morning brief
+    try:
+        bnames = sorted(f for f in os.listdir(os.path.join(st, "brief")) if f.endswith("-morning.md") and SAFE_NAME.match(f))
+    except OSError:
+        bnames = []
+    if bnames:
+        c = card("autonomous", "brief", "morning brief - " + bnames[-1][:-len("-morning.md")], "", kind="brief", excerpt="")
+        l = publish("briefs", bnames[-1], c, "full brief", srcdir="brief")
+        body = c.pop("_body", None)
+        if l:
+            c["links"].append(l)
+            c["excerpt"] = "\n".join(body.split("\n")[:14]) if body is not None else WITHHELD
+            cards.append(c)
+    recent = [r for r in acts_all if nn - dt.timedelta(hours=ACTIVITY_HOURS) <= r["ts"] <= nn + dt.timedelta(minutes=5)]
+    recent.sort(key=lambda r: r["ts"], reverse=True)
+    for r in recent[:ACTIVITY_LIMIT]:
+        cards.append(card("autonomous", "act:%d" % r["_line"], r["initiative"], r["what"], kind="act", who=r["who"], initiative=r["initiative"],
+                          undo=r["undo"], proof=r["proof"], when=r["ts"].strftime("%m-%d %H:%M")))
+    cards.sort(key=lambda c: -1 if c["col"] != "history" else (c["touched_days"] if c.get("touched_days") is not None else 10 ** 9))
+    for c in cards:
+        for k in ("title", "status", "staged_where", "why", "goal", "who", "initiative", "undo", "proof", "excerpt"):
+            if c.get(k) and secretish(c[k]):
+                c[k] = WITHHELD
+    strat = read_strategist(st, now, errors, publish, card)
+    strat = scrub(strat)
+    waiting_n = sum(1 for t in tri_cards if t["lane"] == "waiting")
+    tri = {"cards": tri_cards, "idle_days": IDLE_DAYS,
+           "counts": {"waiting": waiting_n, "inflight": sum(1 for t in tri_cards if t["lane"] == "inflight"),
+                      "idle": sum(1 for t in tri_cards if t["idle"] is not None and t["idle"] >= IDLE_DAYS)}}
+    return {"rendered": now.strftime("%Y-%m-%dT%H:%M:%S"), "rendered_epoch": int(now.timestamp()),
+            "last_wake": shorten(clean_line(parsed["last_wake"]), 140), "asks_open": sum(1 for c in cards if c["col"] == "waiting" and not c.get("answered")),
+            "tick": read_tick(st), "ceiling": ceiling(st, now), "limits": limits(st),
+            "errors": errors, "cards": scrub(cards), "strategist": strat, "triage": scrub(tri)}, files
+
+
+def band(repo, now):
+    """Four plain-text lines: now · asks · ran · tick. Never raises."""
+    try:
+        model, _ = build(repo, now)
+        n = (model["strategist"].get("next") or {}).get("now") or "—"
+        c = model["triage"]["counts"]
+        asks = "%d waiting on you · %d in flight · %d idle >=%dd" % (c["waiting"], c["inflight"], c["idle"], IDLE_DAYS)
+        ran = str(sum(1 for c_ in model["cards"] if c_["col"] == "autonomous" and c_.get("kind") == "act"))
+        t = model["tick"]
+        tick = (t["finished"][5:16].replace("T", " ") or "?") if t else "none"
+        out = ["now · " + n, "asks · " + asks, "ran · " + ran, "tick · " + tick]
+    except Exception:
+        out = ["now · —", "asks · ?", "ran · ?", "tick · none"]
+    return [WITHHELD if secretish(clean_line(l)) else clean_line(l) for l in out]
+
+
+# ---------- html ----------
+CSS = """:root{--bg:#10131a;--surface:#181c26;--border:#2a3144;--text:#e6e9ef;--muted:#8b95a8;--accent:#e0a030;--blue:#5ab4e8;--green:#5cc98a;--red:#ef7b7b;--purple:#a58df0}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,sans-serif;padding:10px}
+h1{font-size:17px;margin:2px 0 8px;color:var(--accent)}code{font:12.5px ui-monospace,Menlo,monospace;background:#0e1118;padding:0 3px;border-radius:3px}
+.strip{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.pill{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:5px 9px;font-size:12.5px;color:var(--muted)}
+.pill b{color:var(--text)}.pill.bad{border-color:var(--red);color:var(--red)}.pill.bad b{color:var(--red)}
+.banner{background:#3a1a1a;border:1px solid var(--red);color:#fecaca;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13.5px}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px;align-items:start}
+.col h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:6px 2px}.col h2 .n{color:var(--accent)}.col h2 small{text-transform:none;letter-spacing:0;font-weight:400}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 11px;margin-bottom:8px}
+.card.live{border-left:3px solid var(--green)}.card.stale{border-left:3px solid var(--accent)}.card.answered{opacity:.6}
+.card .t{font-weight:600;word-break:break-word}.card .s{color:#c3ccdb;font-size:13.5px;margin-top:2px}
+.meta{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:6px;font-size:12px;color:var(--muted)}.meta .live{color:var(--green)}.meta .warn{color:var(--accent)}.meta a{color:var(--blue)}.meta .wh{color:var(--red)}
+details summary{cursor:pointer;color:var(--purple);font-size:12px;margin-top:5px}details div{font-size:13px;color:#c3ccdb;margin-top:4px}
+.sub{font-size:11.5px;color:var(--muted);margin:8px 2px 4px}.empty{color:var(--muted);font-size:13px;padding:4px 2px}
+.nowline{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:7px 10px;margin-bottom:10px;font-size:13.5px}.nowline b{color:var(--accent)}.nowline small{color:var(--muted)}.nowline .warn{color:var(--accent)}
+.sl{display:inline-block;border:1px solid var(--blue);color:var(--blue);border-radius:10px;padding:0 7px;font-size:11.5px;margin-right:6px}.sl.tap{border-color:var(--green);color:var(--green)}.sl.decide{border-color:var(--purple);color:var(--purple)}
+.pl{display:inline-block;border-radius:8px;padding:0 6px;font-size:11px;margin-left:5px;border:1px solid var(--muted);color:var(--muted)}.pl.DEAD{border-color:var(--red);color:var(--red)}.pl.STALE{border-color:var(--accent);color:var(--accent)}
+.row{padding:6px 0;border-bottom:1px solid var(--border);font-size:13.5px}.row:last-child{border-bottom:0}.row .m{color:var(--muted);font-size:12px}
+.card.brief pre{white-space:pre-wrap;word-break:break-word;font:12.5px/1.4 ui-monospace,Menlo,monospace;color:#c3ccdb;margin:4px 0 0}
+@media(max-width:700px){.cols{display:flex;flex-direction:column}}"""
+JS = """(function(){var e=document.getElementById('rendered');if(!e)return;var t=+e.dataset.epoch,m=(Date.now()/1000-t)/60;
+if(m>10){e.parentNode.className+=' bad';e.textContent=e.textContent+' - STALE '+Math.round(m)+' min'}})();"""
+COLS = [("running", "Running", "overseers with a live pid, then open initiatives"),
+        ("waiting", "Waiting on you", "open asks and staged actions"),
+        ("autonomous", "Autonomous", "what ran unattended, last %d h (activity.tsv)" % ACTIVITY_HOURS),
+        ("closed", "Recently closed", ""),
+        ("history", "History", "every report filed")]
+
+
+def link_html(l):
+    return '<a href="%s">%s</a>' % (html.escape(l["href"]), l["label"]) if l["href"] else '<span class="wh">%s withheld</span>' % l["label"]
+
+
+def render_card(c):
+    if c.get("kind") == "brief":
+        return '<div class="card brief"><div class="t">%s</div><pre>%s</pre><div class="meta">%s</div></div>' % (
+            html.escape(c["title"]), html.escape(c["excerpt"] or "(empty)"), " ".join(link_html(l) for l in c["links"]))
+    if c.get("kind") == "act":
+        meta = [html.escape(c["when"]), html.escape(c["who"])]
+        if c["undo"]:
+            meta.append("undo: " + html.escape(c["undo"]))
+        if c["proof"]:
+            meta.append("proof: <code>%s</code>" % html.escape(c["proof"]))
+        return '<div class="card"><div class="t">%s</div><div class="s">%s</div><div class="meta">%s</div></div>' % (
+            html.escape(c["initiative"]), html.escape(c["status"]), " · ".join(meta))
+    cls = ["card"] + (["live"] if c.get("live") else []) + (["stale"] if c.get("stale") else []) + (["answered"] if c.get("answered") else [])
+    short = shorten(c["status"], 170)
+    meta = []
+    if c.get("live"):
+        meta.append('<span class="live">● live pid %d</span>' % c["live"]["pid"])
+    if c.get("age") is not None:
+        meta.append("%s %dd ago" % (c["age_label"], c["age"]))
+    if c.get("touched") and c["col"] in ("open", "running", "waiting", "closed", "history"):
+        td = c.get("touched_days")
+        meta.append('<span class="%s">touched %s</span>' % ("warn" if c.get("stale") else "", c["touched"] if td is None else "%s (%dd)" % (c["touched"], td)))
+    if c.get("answered"):
+        meta.append("go recorded")
+    if c.get("branch"):
+        meta.append("<code>%s</code>" % html.escape(c["branch"]))
+    meta += [link_html(l) for l in c["links"]]
+    more = []
+    for k, lab in (("goal", "goal"), ("why", "why"), ("staged_where", "staged"), ("spec", "file")):
+        if c.get(k):
+            more.append("<div><i>%s:</i> %s</div>" % (lab, html.escape(c[k])))
+    if len(plain(c["status"])) > len(short):
+        more.append("<div>%s</div>" % inline(c["status"]))
+    full = "<details><summary>more</summary>%s</details>" % "".join(more) if more else ""
+    return '<div class="%s"><div class="t">%s</div><div class="s">%s</div><div class="meta">%s</div>%s</div>' % (
+        " ".join(cls), html.escape(c["title"]), html.escape(short), " ".join(meta), full)
+
+
+def render_strategist(m):
+    sg = m.get("strategist") or {}
+    have = sg.get("have", {})
+    nl, n = "", sg.get("next")
+    if n:
+        age = ""
+        if n.get("age_days") is not None:
+            ah = n.get("age_hours", 0)
+            age = ' <small class="%s">(next.md %s ago)</small>' % ("warn" if n["age_days"] >= 3 else "", ("%dh" % ah) if ah < 48 else "%dd" % n["age_days"])
+        nl = '<div class="nowline"><b>now</b> %s · <b>on deck</b> %s · <b>week</b> %s%s</div>' % (
+            html.escape(n["now"] or "—"), html.escape(n["deck"] or "—"), html.escape(n["week"] or "unset"), age)
+    panes = []
+    if have.get("priorities.md"):
+        pr = sg.get("priorities") or []
+        body = "".join('<div class="row"><span class="sl %s">%s</span><b>%s</b><div class="m">%s</div><div class="m">next: %s · since %s</div></div>' % (
+            html.escape(plain(r["slot"]).lower()), html.escape(plain(r["slot"]).lower()), inline(shorten(col(r, "what"), 140)),
+            html.escape(shorten(col(r, "why"), 160)), html.escape(shorten(col(r, "next"), 160)), html.escape(col(r, "since"))) for r in pr)
+        panes.append(("Priorities", "ranked (priorities.md)", body or '<div class="empty">nothing ranked</div>', len(pr)))
+    if have.get("arc.md"):
+        arc = (sg.get("arc") or []) + (sg.get("outside") or [])
+        body = ""
+        for r in arc:
+            al = col(r, "alarms")
+            pills = "".join('<span class="pl %s">%s</span>' % (a, a) for a in ("DEAD", "STALE", "ORPHAN") if a in al)
+            body += '<div class="row"><b>%s</b> %s · %s%s<div class="m">initiatives: %s · last moved %s</div></div>' % (
+                html.escape(col(r, "spec")), html.escape(shorten(col(r, "status"), 80)), html.escape(col(r, "owner")), pills,
+                html.escape(col(r, "initiatives")), html.escape(col(r, "last moved")))
+        if sg.get("moved"):
+            body = '<div class="sub">moved since</div>' + "".join('<div class="row m">%s</div>' % html.escape(x) for x in sg["moved"]) + body
+        panes.append(("Arc", "one line per workstream (arc.md)", body or '<div class="empty">nothing</div>', len(arc)))
+    if have.get("threads.md"):
+        th = sg.get("threads") or []
+        body = "".join('<div class="row"><b>%s</b> <span class="pl">%s</span><div class="m">waiting on %s · since %s</div><div class="m">check: %s</div></div>' % (
+            inline(shorten(col(r, "thread"), 120)), html.escape(plain(col(r, "tag"))), html.escape(shorten(col(r, "waiting on"), 100)),
+            html.escape(col(r, "since")), html.escape(shorten(col(r, "how to check"), 140))) for r in th)
+        panes.append(("Threads", "waiting on the world (threads.md)", body or '<div class="empty">nothing</div>', len(th)))
+    return nl, panes
+
+
+def render_html(m):
+    ts = m["rendered"].replace("T", " ")
+    strip = ['<span class="pill"><span id="rendered" data-epoch="%d">rendered <b>%s</b></span></span>' % (m["rendered_epoch"], ts),
+             '<span class="pill">last wake <b>%s</b></span>' % html.escape(m["last_wake"] or "unknown"),
+             '<span class="pill">open asks <b>%d</b></span>' % m["asks_open"]]
+    t = m.get("tick")
+    strip.append('<span class="pill">last tick <b>%s</b></span>' % (html.escape("%s · %s · %s" % (t["finished"][:16].replace("T", " ") or "?", t["mode"], t["subtype"])) if t else "no tick yet"))
+    cg = m.get("ceiling")
+    if cg:
+        strip.append('<span class="pill">today attended <b>$%.2f</b></span>' % cg["attended_usd"])
+        strip.append('<span class="pill%s">unattended <b>$%.2f of $%.2f</b></span>' % (" bad" if cg["spent"] else "", cg["usd_used"], cg["usd_ceiling"]))
+    tc = m["triage"]["counts"]
+    strip.append('<span class="pill">waiting on you <b>%d</b> · in flight <b>%d</b> · idle >=%dd <b>%d</b></span>' % (tc["waiting"], tc["inflight"], IDLE_DAYS, tc["idle"]))
+    p = ['<h1>work board</h1><div class="strip">%s</div>' % "".join(strip)]
+    for e in m["errors"]:
+        p.append('<div class="banner">parse error - <b>%s</b>%s: %s</div>' % (html.escape(e["section"]), (", line %d" % e["line"]) if e["line"] else "", html.escape(e["msg"])))
+    nl, panes = render_strategist(m)
+    p.append(nl)
+    p.append('<div class="cols">')
+    for name, hint, body, n in panes:
+        p.append('<section class="col"><h2>%s <span class="n">%d</span><small>%s</small></h2>%s</section>' % (name, n, html.escape(hint), body))
+    for key, name, hint in COLS:
+        if key == "running":
+            cs = [c for c in m["cards"] if c["col"] in ("running", "open")]
+            live = [c for c in cs if c["col"] == "running"]
+            idle = [c for c in cs if c["col"] == "open"]
+            body = "".join(render_card(c) for c in live) or '<div class="empty">no live overseer</div>'
+            if idle:
+                body += '<div class="sub">open, no live run</div>' + "".join(render_card(c) for c in idle)
+            n = len(live)
+        else:
+            cs = [c for c in m["cards"] if c["col"] == key]
+            n = len(cs)
+            body = "".join(render_card(c) for c in cs[:HISTORY_LIMIT]) or '<div class="empty">nothing</div>'
+            if n > HISTORY_LIMIT:
+                body += '<div class="sub">+%d more in board.json</div>' % (n - HISTORY_LIMIT)
+        p.append('<section class="col"><h2>%s <span class="n">%d</span><small>%s</small></h2>%s</section>' % (name, n, html.escape(hint), body))
+    p.append("</div>")
+    csp = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; script-src 'sha256-%s'" % base64.b64encode(hashlib.sha256(JS.encode()).digest()).decode()
+    return ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<meta http-equiv="Content-Security-Policy" content="%s"><meta http-equiv="refresh" content="60">'
+            '<title>work board</title><style>%s</style></head><body>%s<script>%s</script></body></html>') % (csp, CSS, "".join(p), JS)
+
+
+# ---------- output ----------
+MARKER = ".board-out"
+
+
+def write_atomic(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp.%d" % os.getpid()
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
+def emit(out, page, model, files):
+    os.makedirs(out, exist_ok=True)
+    if [f for f in os.listdir(out) if f not in (".render.lock", MARKER)] and not os.path.exists(os.path.join(out, MARKER)):
+        sys.exit("board: %s is not empty and has no %s marker - refusing to write or prune there" % (out, MARKER))
+    written = {MARKER, ".render.lock"}
+    write_atomic(os.path.join(out, MARKER), "board output - written and pruned by agents/bin/board\n")
+    for rel, body in files.items():
+        write_atomic(os.path.join(out, rel), body)
+        written.add(rel.replace("/", os.sep))
+    write_atomic(os.path.join(out, "board.json"), json.dumps(model, indent=1))
+    write_atomic(os.path.join(out, "index.html"), page)  # last: the page never links a file not yet there
+    written |= {"board.json", "index.html"}
+    for root, dirs, fs_ in os.walk(out, topdown=False):
+        for f in fs_:
+            if os.path.relpath(os.path.join(root, f), out) not in written:
+                os.unlink(os.path.join(root, f))
+        for d in dirs:
+            try:
+                os.rmdir(os.path.join(root, d))
+            except OSError:
+                pass
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--out")
+    ap.add_argument("--band", action="store_true")
+    ap.add_argument("--repo", default=os.environ.get("AGENTS_REPO") or os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", ".."))
+    ap.add_argument("--now", help="test clock, ISO local time")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args()
+    repo = os.path.realpath(a.repo)
+    now = dt.datetime.fromisoformat(a.now) if a.now else dt.datetime.now()
+    if a.band:
+        print("\n".join(band(repo, now)))
+        return 0
+    out = os.path.abspath(a.out or os.path.join(repo, "agents/state/board"))
+    if not a.out and not (os.path.realpath(out) + os.sep).startswith(repo + os.sep):
+        print("board: refusing to render: %s resolves outside the repo (a symlink?). Pass --out DIR to choose a folder yourself." % out, file=sys.stderr)
+        return 1
+    os.makedirs(out, exist_ok=True)
+    lock = open(os.path.join(out, ".render.lock"), "w")
+    if fcntl:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        model, files = build(repo, now)
+        page = render_html(model)
+        emit(out, page, model, files)
+    except SystemExit:
+        raise
+    except Exception as e:
+        print("board: render failed: %r" % e, file=sys.stderr)
+        return 1
+    if a.json:
+        print(json.dumps(model, indent=1))
+    for e in model["errors"]:
+        print("board: parse error [%s] line %s: %s" % (e["section"], e["line"], e["msg"]), file=sys.stderr)
+    print("board: wrote %s" % os.path.join(out, "index.html"), file=sys.stderr)
+    return 2 if model["errors"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
