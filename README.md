@@ -7,7 +7,7 @@ framework itself. It is for people who want Claude Code to do real operational w
 home or small-office systems, long-running projects) without being able to do anything they cannot
 take back, and for people evaluating how that can be built.
 
-The kit in this repo is called Hatchery. It was extracted from a framework the author runs on a
+The kit in this repo is called Hatchery. It was extracted from a framework I run on a
 self-hosted homelab. Everything is plain files in a git repo: rules, prompts, routing tables, state.
 
 ## The problem
@@ -29,7 +29,7 @@ whole. Most of what follows exists because something in the log went wrong.
 
 **Roles.** The *overlord* is the session you talk to. It reads state, picks who should do a job,
 checks what comes back, and writes down what it needs from you. It does not do the work. An
-*overseer* owns one initiative from plan to report, on its own git branch (headless in the author's
+*overseer* owns one initiative from plan to report, on its own git branch (headless in my
 deployment; the public kit has the overlord play this part interactively). *Workers* make
 changes. *Scouts*, *researchers* and *verifiers* read, look things up and re-run checks.
 
@@ -58,7 +58,7 @@ the undo, log it. A model cannot talk its way past a regex. The hooks are guard 
 
 **Cost routing by model.** Reading is cheap, doing is mid-range, judging is expensive, designing is
 top. A routing table says which role runs on which tier, and a role that has to exceed its row logs
-why. In the author's deployment, dispatch carries per-run turn and budget caps and a monthly ceiling. Idle costs nothing between
+why. In my deployment, dispatch carries per-run turn and budget caps and a monthly ceiling. Idle costs nothing between
 ticks, and the scheduled loop has its own daily ceiling that it checks before doing anything.
 
 **State is files.** Nothing lives in a running process's head. The overlord reads one state file on
@@ -88,7 +88,7 @@ traces to one or two of them:
 - **A cost ceiling and model routing** give those apps a spend bound the agent cannot edit.
 - **The drift log and the overmind** let the system improve from its own failures.
 
-[`kit/INTEGRATIONS.md`](kit/INTEGRATIONS.md) goes through what the author has pointed it at, each item
+[`kit/INTEGRATIONS.md`](kit/INTEGRATIONS.md) goes through what I have pointed it at, each item
 marked as run, built, or merely possible:
 
 - home automation, media libraries and their acquisition pipeline, a photo library and document vault;
@@ -98,18 +98,18 @@ marked as run, built, or merely possible:
 - a tabletop-game DM bridge that acts on untrusted player input, a drafter for privacy-rights
   requests that never sends, owner-only phone notifications, a local model on a shared GPU.
 
-**The app platform.** The part the author finds most useful is not any one integration but what
-they add up to. The deployment has always-on primitives, each reachable through a scoped API: a
+**The app platform.** The part I find most useful is not any one integration but what
+they add up to. My deployment has always-on primitives, each reachable through a scoped API: a
 network with LAN DNS, a DNS and tunnel provider, a secrets manager, a single-node Kubernetes, a NAS
 for backups, an OIDC identity provider with passkeys, a self-hosted git forge, an owner-only phone
-path, and a detection-and-remediation loop. With those in place, an idea talked through with the
+path, and a detection-and-remediation loop. With those in place, an idea I talk through with the
 overlord becomes a brief with an availability tier, a design review, workers that write the
 manifests, secrets, identity client, name, backup job and health alarm, a security review for
-anything exposed, a verifier, and a loop that watches the result afterwards. The owner approves a
-few named steps; the rest is fair game under the two lists. The page also says plainly where the
-owner's hand still is (the internet path, identity core, storage layout, irreversible deletes,
+anything exposed, a verifier, and a loop that watches the result afterwards. I approve a
+few named steps; the rest is fair game under the two lists. The page also says plainly where my
+hand still is (the internet path, identity core, storage layout, irreversible deletes,
 sends) and how each is shrunk to one tap. It walks through two real builds, a game-library app and
-a file-drop page, with the owner's taps listed.
+a file-drop page, with my taps listed.
 
 It also covers three things in more depth: worked examples of privacy by construction (a hook that
 keeps notifications off a device that is not yours, secrets that are never echoed); how exposure is
@@ -146,7 +146,7 @@ It is a map of fits, not a product list, and the unattended parts still need you
 
 ## What it missed
 
-Drawn from the drift log of the author's deployment, generalized. Counts are rough and are lines
+Drawn from the drift log of my deployment, generalized. Counts are rough and are lines
 in a log, not incidents; one event can produce several.
 
 | Category | Rough count | What it taught |
@@ -166,12 +166,12 @@ in a log, not incidents; one event can produce several.
 Two caveats worth stating. The framework catches mistakes of fact and of process much better than it
 catches a persuasive wrong design. And the cheapest tier is only as good as its brief.
 
-## Numbers, from the author's own deployment
+## Numbers, from my own deployment
 
-Aggregates only, taken from the generated scorecard and state files at the time of extraction. The
-deployment is a single owner's homelab, so these describe one real use, not a benchmark.
+Aggregates only, taken from the generated scorecard and state files at the time of extraction. It is
+my own homelab, so these describe one real use, not a benchmark.
 
-- **Gate regression suite (author's deployment):** 142 cases for the shell guard hook, run in under a
+- **Gate regression suite (my deployment):** 142 cases for the shell guard hook, run in under a
   second and on every commit that touches the hooks. Of those, about 60 expect a block, about 18
   expect an ask, and 2 are recorded accepted false positives. Every real block and every false
   positive ever seen became one. **What ships in the kit:** `kit/plugin/hooks/cases.txt` has 100 cases
@@ -186,8 +186,8 @@ deployment is a single owner's homelab, so these describe one real use, not a be
 - **Overmind reviews:** nine numbered reviews of the framework itself, each ending in concrete edits
   to prompts, personas, routing or hooks.
 - **Test suites.** What ships: `test_board.py` and `test_usage.py` under `kit/template/agents/bin/`,
-  and the `overlord-board` mod's own tests (`claude plugin test kit/mods/overlord-board`). The
-  author's deployment also runs suites for state files, rotation, the strategist and the evaluator;
+  and the `overlord-board` mod's own tests (`claude plugin test kit/mods/overlord-board`). My
+  deployment also runs suites for state files, rotation, the strategist and the evaluator;
   those are not in the kit.
 
 ## Install and quick start
@@ -225,7 +225,7 @@ Invoke with `/hatchery:overlord` and `/hatchery:overmind`.
 
 ## Status and limitations
 
-- **Single maintainer.** One person built and uses this. It is shared as a worked example and a
+- **Single maintainer.** I built this and use it. It is shared as a worked example and a
   usable kit, not a supported product.
 - **Claude Code only.** It depends on Claude Code's plugin, skill, subagent and hook mechanisms.
   Cloud sessions in the browser do not load local plugins.
@@ -237,8 +237,8 @@ Invoke with `/hatchery:overlord` and `/hatchery:overmind`.
   gate binds only when a role variable is set; in your own sessions the owner's-hand shapes ask instead of blocking, and the never-paths block everywhere.
 - **The unattended parts ship switched off.** The governor loop needs an always-on machine, a
   scheduler you set up, and a `tick_mode` you flip from `propose` to `act`. Headless dispatch of
-  overseers onto their own branches exists in the author's
-  deployment and are not in the kit: here the overlord plays the overseer role in your session.
+  overseers onto their own branches exists in my
+  deployment and is not in the kit: here the overlord plays the overseer role in your session.
 - **The numbers above are one deployment's.** No claim is made about how it performs elsewhere.
 
 ## License
