@@ -154,8 +154,14 @@ letters and portal field sheets, from a fact table where every citation, deadlin
 its source URL and a verbatim quote; unverified rows are marked as drafts and never rendered as
 fact. A tracker records submitted, acknowledged, extended, appealed. **Nothing is ever sent.** The
 tool prepares the packet; the owner sends it. Persona: **researcher** builds the fact table, a
-re-fetch spot-check verifies it. Could: monthly re-checks that the quoted sources still say the
-same thing.
+re-fetch spot-check verifies it. Could:
+- **Status monitoring.** A daily sense reads the tracker and flags each request whose statutory
+  deadline is near or passed with no response, and drafts the follow-up or the escalation (an
+  extension check, an appeal, a regulator complaint) for me to send. Where a company offers a
+  request-status page or replies by mail, the agent can read the status (mail through the local
+  model) and update the tracker, so "did they answer?" becomes a line in the morning brief instead
+  of a calendar reminder.
+- **Source re-checks.** Monthly re-fetches that the quoted sources still say the same thing.
 
 ### Phone notifications to the owner only (Runs)
 One command sends pushes, and its target is hard-coded to the owner's own phone. Three channels
