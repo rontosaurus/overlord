@@ -100,13 +100,53 @@ owner's machines and local NAS; finance data is on the never-delete list and its
 account linking.
 
 ### A tabletop-game DM bridge (Runs)
-Players type `@dm <question>` in a virtual-tabletop chat. A bridge service queues the text, a
-consumer runs headless `claude -p` in the campaign repo, and the reply is posted back (and spoken).
-The agent here acts on untrusted input, so the design is the point: player text is passed as content
-inside an in-world frame; the session has file tools on the campaign repo only (no shell, no
-network, no connectors); the bridge logs in as an ordinary player seat, not an admin; its password
-is fetched in-process from a secrets manager. The worst a hostile player gets is wasted tokens or a campaign-file edit, which is a revertible commit, and a
-brush-off. Every ruling is a commit. Could: the same shape for any chat-driven helper.
+Friends and I play a tabletop RPG in a self-hosted virtual tabletop, and Claude is the game master.
+Anyone at the table types `@dm <what my character does>` in the game chat; the DM answers in
+character, in chat, and **speaks the answer aloud at every player's client** in its own voice.
+
+**The table loop, one `@dm` at a time.**
+1. A bridge service, logged in to the tabletop as an ordinary player seat (never an admin), sees the
+   message and turns it into a job. The job carries more than the text: who sent it and which
+   character they play (resolved from the tabletop's ownership records, so the DM never mixes up
+   players), a snapshot of the board (tokens, exact distances, each character's movement budget,
+   whose turn it is), the current map's terrain notes (cover, line of sight, doors), **pre-rolled
+   true-random dice** (a model asked to "roll" skews its numbers; the DM is told to use these in
+   order), and the running scene memory, so it does not re-resolve what already happened.
+2. A consumer runs a headless `claude -p` in the campaign's git repo with the campaign's full
+   history: setting, canon, NPC files, rules cribs, session logs.
+3. The reply is narration plus a short list of **bounded action verbs**: roll, move a token, apply
+   damage, spend an item, start combat, advance the turn, leave a note for later. An executor in
+   the bridge validates each one against a schema and runs it in the tabletop. Harm to a player
+   character's sheet (hit points, removing a token or item) is refused by code, not by prompt.
+4. If an action fails, the bridge rebuilds the job once with the failure reason and retries,
+   instead of dead-ending; a second failure gets an in-character "the world stutters" line.
+5. In combat, when the turn lands on a non-player character, the bridge queues that NPC's turn by
+   itself, so enemies act on time without anyone prompting the DM.
+
+**The voice.** Narration is synthesized by an open-source neural text-to-speech model on my GPU
+and played at every connected client. The model loads on demand and unloads after ten idle
+minutes, so it holds no GPU memory between game nights and never crowds the local model that reads
+mail. NPCs get their own voices through dialogue tags in the narration, a smaller model on the CPU
+voices them, and there is a fallback ladder of lighter engines if the main one is unavailable.
+Pronunciation lives in the speech layer, not the prompt: a lexicon file fixes how proper nouns are
+said, because the DM writes text and never hears itself. Live play shaped the details: long
+narration is chunked and the silence the model pads at chunk edges is trimmed, and punctuation
+that made the engine stall is filtered out before synthesis.
+
+**The campaign loop, between sessions.** Everything the DM learns at the table goes into
+append-only notes. After a session, an autonomous builder (its own tabletop account with a narrow
+role, and no Claude process holds the admin seat) processes those notes end to end: writes the
+session log, creates or updates NPC files, folds new canon into the campaign file with prep for the
+next session, archives and clears the scene memory, updates journals in the tabletop, and commits
+the lot. It can also generate battle maps through an image API and write their terrain notes. The
+next `@dm` starts from that. A scheduled prep tick that would write new content on its own is built
+but switched off, because unasked-for content at a shared table is a consent call, not a technical one.
+
+**Why it is safe to point at strangers' text.** Player text is untrusted input, passed as content
+inside an in-world frame. The DM session has file tools on the campaign repo only (no shell, no
+network, no connectors). The bridge's password is fetched in-process from the secrets manager. The
+worst a hostile player gets is wasted tokens, an in-character brush-off, or a campaign-file edit,
+which is a revertible commit. Could: the same shape for any chat-driven helper.
 
 ### Privacy-rights paperwork (Built)
 A local-first command-line tool drafts data-subject requests (access, deletion, correction) as

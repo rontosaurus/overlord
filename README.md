@@ -95,8 +95,10 @@ marked as run, built, or merely possible:
 - storage arrays, UPS and power-outage recovery, network segmentation, a self-hosted git forge;
 - identity and SSO, remote access (LAN-only by default; anything reachable from outside sits behind the identity gate and
   the security review), personal finance from bank-data aggregation to a monthly brief;
-- a tabletop-game DM bridge that acts on untrusted player input, a drafter for privacy-rights
-  requests that never sends, owner-only phone notifications, and sensitive analysis on a local model on
+- a tabletop-game DM that runs our campaign: it answers each player in character, speaks aloud at
+  every client through a voice model on my GPU, runs NPC turns and real dice, and between sessions
+  folds what happened into the campaign's canon, all while treating player text as untrusted input;
+- a drafter for privacy-rights requests that never sends, owner-only phone notifications, and sensitive analysis on a local model on
   my own GPU (mail and documents today, finance designed), so raw content never reaches a cloud model.
 
 **The app platform.** The part I find most useful is not any one integration but what
