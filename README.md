@@ -96,7 +96,8 @@ marked as run, built, or merely possible:
 - identity and SSO, remote access (LAN-only by default; anything reachable from outside sits behind the identity gate and
   the security review), personal finance from bank-data aggregation to a monthly brief;
 - a tabletop-game DM bridge that acts on untrusted player input, a drafter for privacy-rights
-  requests that never sends, owner-only phone notifications, a local model on a shared GPU.
+  requests that never sends, owner-only phone notifications, and sensitive analysis (mail, documents, finance) on a local
+  model on my own GPU, so raw content never reaches a cloud model.
 
 **The app platform.** The part I find most useful is not any one integration but what
 they add up to. My deployment has always-on primitives, each reachable through a scoped API: a

@@ -130,12 +130,26 @@ message to someone else. Shipment mail is classified locally and shown on a hub 
 staleness alarm lives on the hub, not the host that runs the poller. Could: read-only "what's on
 this week" feeding the morning brief.
 
-### A self-hosted LLM on a shared GPU (Runs)
-A small local model classifies mail and extracts fields, so mail content never reaches a third-party
-model. It shares the GPU with media transcoding, so heavy work is scheduled around busy hours.
-It was gated on measured accuracy (classification, field exactness, zero hallucinated and zero
-schema-violating outputs over a test run) before it was trusted. Could: use it as the cheapest
-tier for bulk triage.
+### Sensitive analysis on a local model (Runs, and Built)
+The most sensitive data is analysed by a small model running on my own GPU, not by a cloud model.
+The rule is simple: the local model reads the raw content, and only what a deterministic filter
+allows ever leaves the box.
+- **Mail (Runs).** A local model classifies mail and extracts fields under a fixed schema, so mail
+  content never reaches a third-party model; identity mail is classified locally only, and any
+  action crosses a schema-only boundary with approve-first defaults.
+- **Documents (Runs).** In the document vault the local model *proposes* each document's disclosure
+  class (full, summary, redacted, never), a stored class *decides*, and code *enforces* it, with hard
+  floors for sensitive document types that no model output can lift.
+- **Finance (Built, not yet switched on).** The ledger never leaves the machine. The design: a local
+  model turns a plain-English question into SQL, and a deterministic egress filter, not the model's
+  judgment, lets out only aggregates (sums, counts, category names, months) with a minimum count so
+  a single transaction cannot be re-identified. No merchant or memo free text leaves, because text
+  from a bank feed is an injection channel. A cloud model then writes the brief from those
+  aggregates only.
+
+The model shares the GPU with media transcoding, so heavy work is scheduled around busy hours. It
+was gated on measured accuracy (classification, field exactness, zero hallucinated and zero
+schema-violating outputs over a test run) before it was trusted.
 
 ## 3. Privacy by construction: worked examples
 
