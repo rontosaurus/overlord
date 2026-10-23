@@ -11,19 +11,20 @@ pattern, not so you can copy a deployment.
 
 ## 1. How capabilities arise
 
-Each capability below is a consequence of one or two framework pieces, not a feature on its own.
+Each capability below is a consequence of one or two framework pieces, not a feature on its own (the last row is the exception: it is what the framework is plugged into).
 
 | Piece | What it makes safe enough to try |
 |---|---|
 | Workers that must end with an attestation table, re-run by a verifier | Letting agents touch real systems. A report is only believed after its read-only checks pass again. |
 | Read-only reviewers, and a security review as the one merge gate | Exposing things. The reviewer cannot fix what it flags, so "who judged" and "who changed" stay separate. |
 | Hooks plus two lists (never, owner's hand) | Unattended runs. A headless role is refused the irreversible shapes and stages them instead. |
-| State in files, plus the governor loop (`tick`) | Long-running "apps" with memory: a daily job reads its own files, acts, writes them back, exits. Idle costs nothing. |
-| A cost ceiling in a file plus model routing | Apps with a spend bound. The cheap tier reads, the mid tier does, the top tier is rationed, and a ceiling the agent cannot edit stops the loop. |
+| State in files, plus the governor loop (`tick`) | Long-running services with memory: a daily job reads its own files, acts, writes them back, exits. Idle costs nothing. |
+| A cost ceiling in a file plus model routing | Work with a spend bound. The cheap tier reads, the mid tier does, the top tier is rationed, and a ceiling the agent cannot edit stops the loop. |
 | Drift log plus the overmind review | A system that improves from its own failures. Every block, waiver and slip is a counted line, and the review turns counts into rule changes. |
+| **Always-on infrastructure primitives** (network, DNS and tunnel provider, secrets manager, Kubernetes, NAS, identity provider, git forge, phone path, detection loop) | The **app platform** (section 4). With the pieces above in place and each reachable through a scoped API, an idea talked through with the overlord can be built, wired, backed up and monitored by the framework, with the owner approving a few named steps. |
 
 Read left to right and you get the order the author built things in: verification first, then
-exposure, then unattended work, then apps with memory and a budget, then self-review.
+exposure, then unattended work, then services with memory and a budget, then self-review, and finally the platform that lets you ask for a whole service.
 
 ## 2. Integration catalogue
 
@@ -98,12 +99,6 @@ owner's machines and local NAS; finance data is on the never-delete list and its
 `H4_NEVER_PATHS`. Agents compute and draft. Owner's hand: money movement, always, and any
 account linking.
 
-### A job-search engine (Runs)
-Section 4 walks through this one. In short: sense listings from public job-board APIs, score with a
-mid-tier model with the company name redacted, show a ranked digest on a LAN page, and tailor a
-resume on demand from a button, under a monthly ceiling. Owner's hand: every send. The agent never
-posts, applies or messages; the owner pastes or clicks Submit in their own browser.
-
 ### A tabletop-game DM bridge (Runs)
 Players type `@dm <question>` in a virtual-tabletop chat. A bridge service queues the text, a
 consumer runs headless `claude -p` in the campaign repo, and the reply is posted back (and spoken).
@@ -165,11 +160,6 @@ and a golden case, not one.
 (email only), one for all infrastructure with zero email. No CNAME between zones, no mail on the
 infrastructure domain, no service on a mail domain. A new hostname that crosses it fails review as a rule.
 
-**A scorer that cannot be impressed by a brand.** The job-scoring prompt receives postings with the
-company name removed, and the name is re-attached after scoring. Code, not the model, validates the
-output (fit range, cited claim ids exist in the inventory). The point is not secrecy; it is that
-brand should not buy rank.
-
 **LAN-only pages with no login, versus internet-facing ones behind SSO.** A read-mostly status or
 digest page on the LAN has no login when it sits on a trusted network segment and holds only content fit for anyone on it. It is only used for content the author is content for anyone on that
 network to read, and the security review checks the content (it once caught a private contact claim
@@ -184,78 +174,124 @@ whole tree, dotfiles included, for a list of names, hosts, addresses, dates, ide
 personal terms, and refuses to build if any matches. Hits are reviewed and rewritten by hand, never
 auto-replaced. Each edition carries its own allow list, so terms allowed in one build still fail another. A failed leak check is a build failure, not a warning.
 
-## 4. An app platform: the job-search engine, end to end
+## 4. An app platform: from an idea to a running service
 
-The pattern, with the framework pieces called out at each step.
+The framework alone is plumbing. What turns it into a platform is what it is plugged into. The
+author's setup has a handful of always-on infrastructure primitives, each reachable by an agent
+through an API or a command, each with a scope. Together they mean the owner can think an idea
+through with the overlord and have the pieces **built, wired, backed up and monitored by the
+framework**, with the owner approving a few named steps. This section says which
+primitives, what the flow looks like, where the owner's hand still is, and two real examples.
 
-1. **Timers.** Systemd user timers on an always-on host: sensing twice a day (plain code, no
-   model), then scoring and the digest once a morning on weekdays. A device that is not always on
-   hosts nothing here.
-2. **Sensing.** Code polls public job-board APIs (applicant-tracking-system boards, a monthly
-   forum thread, a remote-jobs feed, an aggregator with a personal-research tier). A listing is
-   marked closed only by absence from a *successful* fetch of its own board; a failed fetch changes
-   nothing. No scraping of sites whose terms forbid it, no profile automation, nothing logs in as
-   the owner.
-3. **Scoring under a ceiling.** A mid-tier model scores batches of redacted postings: fit, three
-   strongest matched claims, three gaps, pay against a configured floor, work-mode match. Code
-   enforces the enums and the rules. A state file holds the month-to-date spend; each run has a hard
-   per-run budget and reads the file first.
-4. **A static page, served read-only.** The digest is rendered to one HTML file. A tiny
-   standard-library server in a pod mounts the rendered directory read-only; it cannot see the repo,
-   the scores, the cluster, or any secret, and has no service-account token or outbound network. CSP
-   denies everything but its own styles.
-5. **POST request queue.** Each posting card has buttons: *generate resume*, *opened*, *sent*, *not
-   sending (reason)*, and a *generate anyway* override. A POST must carry an `Origin` that exactly
-   equals the page's own, `Sec-Fetch-Site: same-origin`, a fixed content type and length, only known
-   fields, a CSRF token, a listed posting id, and an enum op. Failures are 4xx with no echo. The pod
-   limits requests per hour and per posting per day, and refuses when the queue holds too many
-   files. Its only writable path is the queue directory, a small tmpfs, one file per accepted
-   request, created exclusively without following links.
-6. **A host unit drains the queue.** A systemd path unit wakes a host-side consumer that
-   *re-validates everything the pod did* (the pod's limits reset when it restarts, so the host
-   ceiling is the control). The override has its own bounded count per day and does not skip the
-   monthly cap.
-7. **The tailor runs under the ceiling.** Before a top-tier call the run reserves a fixed amount
-   against the ceiling and reconciles after. The posting is re-fetched live first so a closed one
-   does not cost a run. The model may select, order and reword claims from an evidence inventory; a
-   lint gates every output: a line without a claim id, an unknown id, or a number not in that
-   claim's metric fails the render.
-8. **Results back on the page.** The page re-renders with the resume, cover note and an alignment
-   report linked from the card. A one-tap *opened* takes the owner to the staged files; the owner
-   submits from their own browser.
+### The primitives
 
-What each framework piece contributed:
+| Primitive | What the framework does with it |
+|---|---|
+| **The network**: a gateway, LAN DNS, segments | Reads and (through staged, reviewed steps) writes names and address reservations. A new service gets a LAN name by default. |
+| **A DNS and outbound-tunnel provider**, reached through its API with a scoped token | Creates records for a new name. The token is limited to the one zone it needs, is fetched in-process, and every write is a staged exact command. |
+| **A secrets manager**, read by the agents in-process | A machine account scoped to one project. A worker creates or reads a service's keys from it without printing them. Vault-unlock material lives in a different project that account can never be granted. |
+| **An always-on single-node Kubernetes** (k3s) | Where containers run. Manifests are written to a convention: pinned image digest, non-root, no service-account token, a network policy per pod, an ingress with a wildcard certificate already in place. |
+| **A NAS** for durable state and backups | A nightly backup job per service writes there, retention is set, and the restore is drilled. The tier decides whether a service is backed up at all. |
+| **An OIDC identity provider with passkeys** | Single sign-on and a forward-auth gate in front of any app that people outside the house will use; a per-app client is registered by an API call. |
+| **A self-hosted git forge** | The system of record: one branch per initiative, merge after verification, every change recorded with its undo. |
+| **A phone notification path, owner only** | Asks, alerts and the morning brief reach one phone through one command with a hard-coded target. |
+| **The detection-and-remediation loop** | Senses (cheap checks), an on-call role, the `tick` that dispatches, runbooks, and alarms that never live on the box they watch. A new service is added to it as part of being built. |
 
-- **Security review (required, the one merge gate).** The design added a new write path (the request
-  queue) and a token, so it was required. It found a private contact claim that would have been
-  rendered to the LAN page as a "where you match" label (fix: only claims marked public are ever
-  listed, and no label list at all if labels cannot load). It found that the queue directory needed a
-  mount-before-apply ordering, because a pod started before the mount keeps writing underneath it.
-  It also asked for the tailor's reserve-then-reconcile spend, and for the override's own cap.
-- **The owner's own phone use found the stale-token bug.** The page rotated its CSRF token on every
-  render, so any tab left open for a few minutes was rejected. Fix: reuse the token for a day, show a
-  clear "page out of date" page on mismatch, and refuse a token file older than a bit over a day.
-- **The spend bound.** `ceiling.json`-style state is in the agent's `deny` list for editing, so the
-  loop cannot raise its own limit. Sensing and scoring cost on the order of a dollar a day; tailoring
-  is the real spend, which is why it has the reserve and the override cap.
-- **Verification.** Each build step ended in attestations that were re-run, including a test that
-  *exercised* the server (a script that runs the real handler on localhost and expects specific
-  status codes), not only one that inspected it.
+### The flow
 
-State as of writing: all of it runs — sensing, scoring, the page, the request queue, the host
-consumer and the tailor. The root-owned host steps were the owner's hand: the agent built to that
-line, staged the exact commands, and stopped until they were run.
+1. **Think it through.** The owner and the overlord talk the idea through until it is a brief:
+   what it is for, who uses it, what it stores, and an **availability tier** (rule: every new
+   service gets one at design time, and the tier decides placement and backup).
+2. **Design review**, for a new service or a new design. A read-only reviewer reads the brief and
+   returns a verdict; findings are folded into the brief before anything is built.
+3. **The overseer dispatches workers**, each ending with an attestation table. Typically: manifests
+   and a namespace; a network policy; the service's secrets created through the secrets manager;
+   an OIDC client registered if people sign in; a LAN name, or a DNS record if it is to be reached
+   from outside; a backup job to the NAS; a sense and an alarm for its health; and the docs and
+   the roadmap updated.
+4. **Security review**, the one merge gate, for anything that is exposed, touches identity or adds
+   a write path. The reviewer cannot fix what it flags; findings are applied and re-checked.
+5. **A verifier re-runs the attestations** from the workers' reports. Only what passes a second
+   time is believed.
+6. **Merge and apply**, then **the loop watches it**: its sense runs, its alarm is armed, its
+   backup shows up on the NAS, and a failure goes to the on-call role like any other.
 
-**Patterns you can reuse**
+**Where the owner's hand still is.** Be honest about it: the internet path (gateway, DNS and
+tunnel writes, certificates), the identity provider's core, storage layout and the mover,
+irreversible deletes, and anything that sends something to a person. These are on the owner's-hand
+list, and the framework does not do them on its own. It shrinks each to one tap: the worker
+prepares the exact command, stages it, and stops; in an attended session the owner approves that
+command on a phone prompt, or answers an *ask* row with a stated reply phrase. Everything not on
+the two lists (never, owner's hand) is fair game, under the three habits: look at live state first,
+record the exact undo, log the action. "Largely without oversight" means exactly that: the owner's
+oversight is the idea at the start, a few taps along the way, and the alarms afterwards.
 
-- **Static page plus request queue.** Serve a rendered file read-only; take actions as small
-  validated files in a queue; let a different, privileged process act on them after re-checking.
-- **Propose, then act.** Run the loop in propose mode first. Read what it would have done. Flip it
-  to act when the proposals have been boring for a while.
-- **Ceilings in files the agent cannot edit.** Spend limits, caps and modes live in files that the
-  deny rules and the shell guard protect. The agent reads them and obeys them.
-- **One tap for the owner.** Reshape every remaining human step until it is one tap or one phrase:
-  an approval prompt, a button, a yes. Aging items get reshaped, not left to rot.
+LAN-only is the default for anything new. Anything reachable from the internet sits behind the
+identity gate and passes the security review, and the apply checks prove that an anonymous request
+is refused.
+
+### Example 1: a game-library app
+
+*The idea.* The owner wanted a browsable library for a collection of game files that were scattered
+across the NAS, and to use it away from home.
+
+*Pieces built, in one working day.* A research pass produced a fact sheet on the app's stack and
+how it writes to its library. The overseer's worker produced: a database and the app in their own
+namespace, with persistent volumes; the library mounted read-only, one folder at a time (the
+build departed from the brief here, and argued it, because a single mount would have collapsed
+thousands of files into one "game"); network policies for both pods; a secrets entry created
+in-process; a nightly backup job writing dump, assets and config to the NAS with 14-day retention;
+a LAN name; and a runbook with the staged steps for later. The design reviewer assigned the tier
+and the security reviewer approved with changes (no service-account tokens, a hardened security
+context, a fail-closed procedure for the later exposure step); a second round folded all of them.
+
+*The owner's taps.* Opening the work ("now, this one"); one phrase to apply; then two things by
+hand in a browser: creating the first admin account and starting the first library scan, outside
+busy hours. Nothing else in the build.
+
+*How it is watched.* The first backup run **failed** (the dump could not connect), and the worker
+stopped instead of retrying; after the fix the overlord verified a real backup set with the
+database's triggers present. The overlord's own verification then checked readiness, the health endpoint by name, the network policies and the backup set.
+
+### Example 2: a file-drop page for a friend
+
+*The idea.* "I want a friend to be able to drop files onto a share on the NAS." One sentence.
+
+*Pieces built.* The researcher compared three candidate apps from primary sources, in a table, and
+overturned the brief's default pick because the resumable-upload feature of the favourite was
+paid-only. The design: a write-only folder per person, a quota, resumable chunked uploads under the
+edge's body-size cap, a read-only filesystem, deny-all egress, a mount that cannot execute files,
+and a hook that vetoes risky uploads. A new share on the NAS and its user were staged as the
+owner's hand (storage layout), with the exact UI steps written. The two reviewers both approved with
+conditions; every condition became either a change in the manifests or a named stop-check in the
+apply order. Later, small asks were one-line changes: raise the quota, simplify the page.
+
+*The owner's taps.* The idea; answers to a few questions in the report (each with a reply phrase);
+creating the share and its user on the NAS by hand; one approval for the public DNS record,
+given in an attended session; the signed-in browser checks that need a real passkey; and sending
+the friend their sign-up link, which is on the never list. The design was ready the same day; the
+service was reachable by name about a day after the request.
+
+*How it is watched.* A check that anonymous requests are refused was written into the existing
+exposure probe, staged for its next apply. One agent write to the identity provider was refused by
+the permission classifier and was handed back as a staged command for the owner's go.
+
+### Patterns you can reuse
+
+- **The tier decides placement and backup.** Decide it at design time; a transient inbox is not
+  backed up, a library with a database is.
+- **Ceilings and modes in files the agent cannot edit.** Spend limits, caps and modes are protected
+  by deny rules and the shell guard; the agent reads them and obeys.
+- **Propose, then act.** Run a loop in propose mode first; flip it to act when the proposals have
+  been boring for a while.
+- **One tap for the owner.** Reshape every remaining human step until it is one tap or one phrase,
+  and let aging items be reshaped rather than rot.
+- **Every new service gets a sense and an alarm, off the box.** The monitor is part of the build,
+  not a follow-up.
+- **Every exposure goes through the security gate**, and the apply checks include a request that
+  must be refused.
+- **Stop on the first failure.** A worker whose step fails reports and stops; a retry that "fixes"
+  it hides what happened.
 
 ## 5. External access and security
 

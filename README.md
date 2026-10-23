@@ -93,17 +93,28 @@ marked as run, built, or merely possible:
 
 - home automation, media libraries and their acquisition pipeline, a photo library and document vault;
 - storage arrays, UPS and power-outage recovery, network segmentation, a self-hosted git forge;
-- identity and SSO, remote access (LAN-only by default, a tunnel for a few named hostnames, a VPN
-  for the rest), personal finance from bank-data aggregation to a monthly brief;
-- a job-search engine (sense, score under a ceiling, tailor on demand, a LAN page with request
-  buttons), a tabletop-game DM bridge that acts on untrusted player input, a drafter for
-  privacy-rights requests that never sends, owner-only phone notifications, a local model on a shared GPU.
+- identity and SSO, remote access (LAN-only by default; anything reachable from outside sits behind the identity gate and
+  the security review), personal finance from bank-data aggregation to a monthly brief;
+- a tabletop-game DM bridge that acts on untrusted player input, a drafter for privacy-rights
+  requests that never sends, owner-only phone notifications, a local model on a shared GPU.
 
-It also covers four things in more depth: worked examples of privacy by construction (a hook that
-keeps notifications off another person's phone, secrets that are never echoed, a scorer that sees no
-company names); the job-search engine as an end-to-end "app platform" with patterns to reuse;
-how exposure is decided, with the security review as the only merge gate; and using the agents to
-investigate incidents, including how to tell whether an agent got better or just different.
+**The app platform.** The part the author finds most useful is not any one integration but what
+they add up to. The deployment has always-on primitives, each reachable through a scoped API: a
+network with LAN DNS, a DNS and tunnel provider, a secrets manager, a single-node Kubernetes, a NAS
+for backups, an OIDC identity provider with passkeys, a self-hosted git forge, an owner-only phone
+path, and a detection-and-remediation loop. With those in place, an idea talked through with the
+overlord becomes a brief with an availability tier, a design review, workers that write the
+manifests, secrets, identity client, name, backup job and health alarm, a security review for
+anything exposed, a verifier, and a loop that watches the result afterwards. The owner approves a
+few named steps; the rest is fair game under the two lists. The page also says plainly where the
+owner's hand still is (the internet path, identity core, storage layout, irreversible deletes,
+sends) and how each is shrunk to one tap. It walks through two real builds, a game-library app and
+a file-drop page, with the owner's taps listed.
+
+It also covers three things in more depth: worked examples of privacy by construction (a hook that
+keeps notifications off a device that is not yours, secrets that are never echoed); how exposure is
+decided, with the security review as the only merge gate; and using the agents to investigate
+incidents, including how to tell whether an agent got better or just different.
 It is a map of fits, not a product list, and the unattended parts still need you to turn them on.
 
 ## How it changed (the honest part)
@@ -149,7 +160,7 @@ in a log, not incidents; one event can produce several.
 | Credential-handling slip (a value reached a local transcript or file) | 5 | The same class several times. Rules for credential-bearing files were added to every worker prompt and now exist as golden cases; the lesson was that a rule in one prompt is not a rule everywhere. |
 | Data-safety bug that passed review | 2 | Reviews had *read* the artifact (dry run, grep) and nothing had *run* it. Rule added: at least one attestation must exercise the thing. |
 | Reviewer rubber-stamping or asserting unearned status | a handful | The overlord compares verdicts to recorded state. |
-| Context-window blowout | recurring, not counted | A hook now warns an attended session when its context is large or resumes after a long idle, because a fresh session is cheaper. |
+| Context-window blowout | recurring, not counted | A hook now warns an attended session when its context is large or returns after a long idle, because a fresh session is cheaper. |
 | Tooling defects in the framework's own verifier and merge scripts | several, from notes | The verifier ran relative commands from the wrong checkout and produced false failures; the merge script wrote a file and then refused on the dirty tree it had just made. Logged as notes to the overmind, which is what that channel is for. |
 
 Two caveats worth stating. The framework catches mistakes of fact and of process much better than it
@@ -206,7 +217,7 @@ Invoke with `/hatchery:overlord` and `/hatchery:overmind`.
 | `kit/SETUP.md` | Guided first session. |
 | `kit/WALKTHROUGH.md` | First hour; how to disable. |
 | `kit/EXAMPLE-INCIDENT.md` | A worked, reconstructed incident. |
-| `kit/INTEGRATIONS.md` | What you can build on it: integrations, privacy examples, an app platform, external access, investigating with agents. |
+| `kit/INTEGRATIONS.md` | What you can build on it: integrations, privacy examples, the app platform (idea to running service), external access, investigating with agents. |
 | `kit/plugin/` | The Claude Code plugin: two skills (overlord, overmind), nine subagent personas, hook scripts. |
 | `kit/template/` | The repo skeleton you copy: rules file, one-page roadmap, routing table, state files, the governor loop (`tick`, `strategist`), the local board, session rotation and usage tools. |
 | `kit/dropin/` | The settings lines the setup session adds. |
