@@ -36,7 +36,7 @@ how to use it. Open a session and run `/hatchery:overlord` (or `/overlord`) to s
 
 Fill these in; the framework reads them to judge impact.
 
-- **What runs where:** <host or device> — <what it does>
+- **What runs where:** [`roadmap/home-setup.md`](roadmap/home-setup.md) — what you have and what agents may `read`, `manage`, must `ask` about, or must `never` touch (the overlord's first session fills it in with you)
 - **Who depends on it:** <names of the people who depend on this infrastructure> — <what they use>
 - **Quiet hours / do-not-disturb windows:** <HH:MM–HH:MM> — nothing noisy or restarting then
 - **Always-on vs sometimes-on:** <which machines may be off; nothing unattended depends on those>

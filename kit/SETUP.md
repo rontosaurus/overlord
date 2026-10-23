@@ -82,7 +82,7 @@ Ask, one at a time, and write only what they say:
 5. **Anything the agent must never touch?** → one line under "Rules that do not bend" or "Local
    facts" in `CLAUDE.md`, their words.
 
-Everything else about their home is for the first overlord session later. Do not ask it here. Show them the three files when done.
+Everything else about their home is for the first overlord session, which starts with the home-setup interview (`roadmap/home-setup.md`: what they have, from a list of examples, and what the agents may do with each). Do not ask it here. Show them the three files when done.
 
 ## 4. git init and the first commit
 
@@ -185,6 +185,8 @@ off by default; show them `mods/README.md` and let them decide. No Python is fin
 Commit what changed in the repo (`git -C "<repo>" add -A` then `git -C "<repo>" commit -m "setup: done"`; skip if nothing changed). Then tell them:
 
 - From now on they open **their repo folder**, not the `hatchery` folder, and type `/hatchery:overlord`.
+  The first time, it asks about their home setup (router, NAS, UPS, smart-home hub and so on) and what
+  the agents may read, manage, or never touch.
 - What they did themselves today, and that it was theirs on purpose: the installs' admin prompt,
   reading the hooks, turning the plugin on, every restart.
 - How to undo it: `WALKTHROUGH.md` § Turning it off.

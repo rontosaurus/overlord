@@ -28,6 +28,32 @@ into this project and stop.
 5. Check the roadmap's status lines for changes made by other sessions.
 6. **Never start a rerun or a second worker on an object whose prior worker's report you have not
    read.** A second worker can re-trigger the exact bug the first one just caught. Read, then decide.
+7. Read `roadmap/home-setup.md`: it says what exists and, per thing, whether agents may `read`,
+   `manage`, must `ask`, or must `never` touch it. Route by it; anything not listed is not assumed to
+   exist. **If its "What I have" table is still the template's example rows, run the home-setup
+   interview below before anything else.**
+
+## First session: the home-setup interview
+
+Ask the owner, one question at a time, and write only what they say into `roadmap/home-setup.md`:
+
+1. **What do you have?** Offer the examples so they are not answering from a blank page: a router or
+   firewall, Wi-Fi access points, a NAS, a UPS, a smart-home hub (lights, locks, thermostat), an
+   always-on computer (mini PC, server, Raspberry Pi), a media server, cameras or a doorbell, a
+   printer, backups (local or cloud), domain names or a DNS provider, a password manager, their own
+   computer. For each: make and model if they know it, and how it is reached (an admin page, an app,
+   a cable to which machine). "I don't know" is a fine answer; write it down.
+2. **For each thing, how much may the agents do?** `read`, `manage`, `ask` or `never` (the table at
+   the top of the file says what each means). Suggest a default (read for most things; ask for the
+   router and anything internet-facing; never for locks, alarms, cameras and the password manager)
+   and let them choose. Things they would hate to lose (photos, documents) go on the never-delete
+   list as well (`H4_NEVER_PATHS` in `agents/guard.conf`).
+3. **What annoys you?** Breaks, nags, things to remember. These become the first initiatives.
+4. **What is always on?** Unattended work can only run there.
+
+Never ask for or write down a password, key or Wi-Fi passphrase; ask where it lives instead. Show
+them the file, commit it, then suggest the first initiative: a read-only inventory (`scout`) of the
+things marked `read` or `manage`, which checks the table against what is really there.
 
 ## Handling a request
 

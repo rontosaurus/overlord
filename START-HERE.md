@@ -24,8 +24,9 @@ Please do two things, one at a time, and wait for me after each:
    retention periods or training rules from memory - they change; tell me to check the current
    privacy page in my own account.
 
-2. First project. Ask me about my home setup: my gear, my router or firewall (make and model),
-   what is always on, and what annoys me. Write my answers up as ONE short notes page I can save.
+2. First project. Ask me about my home setup, one kind of thing at a time, with examples: my router or
+   firewall, Wi-Fi, a NAS, a UPS, a smart-home hub, an always-on computer, a media server, backups
+   (make and model if I know them), what is always on, and what annoys me. Write my answers up as ONE short notes page I can save.
    Then tell me how to make a Claude Project, put the notes page in it, and ask the same question
    once without the Project and once inside it, so I can see what the notes changed.
 
