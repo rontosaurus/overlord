@@ -360,7 +360,21 @@ scout's, because the cheap tier mis-aggregates.
 what order, which thresholds mean what, which runbook applies. Expertise improves by editing a
 file and replaying the cases it should catch.
 
-**Evals that tell you whether an agent got better or just different.**
+**Debriefs.** Every piece of work ends with one, and none of it is ceremony:
+- *Every report has a drift section*: what felt wrong, a rule worked around, a persona that lacked
+  context, a gate that fired uselessly or failed to fire. The overlord copies each into the drift log
+  with a kind label.
+- *An incident gets a write-up* in a fixed shape: timeline, diagnosis, what was ruled out, any routing
+  slip (for example, an hour spent poking by hand before on-call was asked), and the follow-ups,
+  which become *Watching* lines with a check, not good intentions.
+- *The overmind review reads the debriefs together* with me, roughly monthly: was routing right,
+  were gates respected, did the spirit hold. The outcome is edits to personas, prompts, routing or
+  hooks, or deleting something nobody used.
+- *A lesson becomes a test before it becomes a rule.* A real miss is frozen as a golden case first,
+  then the persona is changed, then the case is replayed, so the next debrief can say whether the
+  change actually helped.
+
+**Checking that a change actually helped.**
 - *Golden-defect replay.* A real miss is frozen as an input and replayed through the persona that
   should have caught it, at its own model row. A change that does not move the catch rate is prose.
 - *The gate regression suite.* Every real block, ask and accepted false positive is a case; the

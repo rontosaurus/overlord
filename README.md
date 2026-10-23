@@ -114,7 +114,8 @@ a file-drop page, with my taps listed.
 It also covers three things in more depth: worked examples of privacy by construction (a hook that
 keeps notifications off a device that is not yours, secrets that are never echoed); how exposure is
 decided, with the security review as the only merge gate; and using the agents to investigate
-incidents, including how to tell whether an agent got better or just different.
+incidents, including the debrief after each one: what happened, what was ruled out, which rule
+was missing, and how the lesson becomes a test case before any prompt is changed.
 It is a map of fits, not a product list, and the unattended parts still need you to turn them on.
 
 ## How it changed (the honest part)
