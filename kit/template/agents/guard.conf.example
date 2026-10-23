@@ -13,23 +13,32 @@
 # tool calls and WebFetch). Put here the people or shared
 # channels that must NEVER receive an automated message: a person's device name, a broadcast
 # target, a shared group channel. Never put a secret here.
+# Examples: a partner's or child's phone name (pat-phone), a family group chat name, a team or club
+# channel, a mailing-list address. Suggested default: everyone you live with plus any group chat you
+# are in; adding an entry is free and you can remove it later.
 # Pick identifiers that appear only in a send (a device name, a channel id). A bare first name
 # also blocks reading commands and file paths that merely mention the person - by design, but you
-# will feel it.
+# will feel it. An empty value turns H1 off.
 H1_PATTERNS='<never-message-this-person>|<other-shared-channel>'
 
 # H4_NEVER_PATHS (deny) - folders whose contents an agent may never delete, in any mode, not even with your
 # tap: `rm -r` or `find ... -delete` naming one is blocked. Photos, documents, finance, anything you keep
-# the only copy of. Empty = off. LIMIT: it matches paths NAMED in the command (`rm -rf /path/to/photos/x`,
+# the only copy of. Examples: the photo library, scanned documents, tax and finance records, family
+# videos, a "keep" folder. Suggested default: every folder that holds the only copy of something; also
+# list them in roadmap/home-setup.md ("Things I would hate to lose"). Empty = off. LIMIT: it matches paths NAMED in the command (`rm -rf /path/to/photos/x`,
 # `find /path/to/photos -delete`). It does NOT see `cd /path/to/photos && rm -rf *`, a glob that expands
 # to the folder, or a deletion made from inside a script or interpreter. Keep real backups of these folders.
 H4_NEVER_PATHS='/path/to/photos|/path/to/documents|_keep'
 
 # H4_PROVIDER_HOSTS (ask) - hosts whose API changes state you cannot undo (DNS provider, registrar). A
 # write call (POST/PUT/PATCH/DELETE, --data) to one asks you when you are at the keyboard and is refused
-# in an unattended run. Reads pass.
+# in an unattended run. Reads pass. Examples: your domain registrar's or DNS provider's API host, a
+# cloud storage or backup service's API host, your router maker's cloud console. Suggested default:
+# none, if you own no domain or such account (leave the placeholder; it matches nothing real).
 H4_PROVIDER_HOSTS='api.dns-provider.example'
 
 # H4_ASK_PATTERNS (ask) - your own "my hand" commands, as one regular expression: a deploy script, a
-# production cluster, a particular namespace. Same behaviour as above. Empty = only the built-in shapes.
+# production cluster, a particular namespace. Same behaviour as above. Examples: `deploy.sh`,
+# `ssh nas`, `kubectl[^;&|]* -n production`, `terraform apply`. Suggested default: empty (only the
+# built-in shapes); the value below is a placeholder, replace or clear it.
 H4_ASK_PATTERNS='deploy-to-prod|kubectl[^;&|]* -n production'

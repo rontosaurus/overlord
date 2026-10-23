@@ -9,7 +9,7 @@ over that file; `merge-settings.sh` adds the lines next to what you already have
 | `hatchery-settings.json` | The three lines and the deny rules, with `@KIT@` / `@REPO@` (and `@KITDENY@` / `@REPODENY@` inside the rules) where your two folder paths go. |
 | `merge-settings.sh` | Fills in the paths and adds only the entries you do not have, in place. Prints only those entries, never your other values (settings can hold tokens). Dry run unless you add `--apply`; keeps a dated backup (delete it when you are happy); refuses a file it cannot parse; where you already have a value, yours wins. Needs bash and jq. |
 
-The three lines:
+What it adds:
 
 - `extraKnownMarketplaces.hatchery` — where the kit's plugin lives. Makes it *available*, nothing more.
 - `enabledPlugins."hatchery@hatchery": false` — listed and **off**. You turn it on, after reading

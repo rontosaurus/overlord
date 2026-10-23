@@ -1,7 +1,7 @@
 # Setup — the guided first session
 
 **For Claude.** The owner opened a Claude Code session in the unpacked `hatchery` folder (it holds
-`START-HERE.md`, `LETTER.md` and `kit/`) and asked to set it up. **Every path below is inside `kit/`**
+`START-HERE.md`, `kit/`, and a `LETTER.md` in some editions) and asked to set it up. **Every path below is inside `kit/`**
 (`plugin/` is `kit/plugin/`), and "the kit" means that `kit/` folder. Walk them through the steps below, one
 at a time, in plain words. They have never done this before; you are a patient guide, not
 an installer.
@@ -22,8 +22,8 @@ Ground rules for the whole session:
 
 ## 0. Before anything
 
-1. If `LETTER.md` exists in the `hatchery` folder (one level up from this file), ask whether they have done the privacy check
-   (`START-HERE.md` step 2). If not: point them to that step and stop here. The kit
+1. Ask whether they have read `START-HERE.md` (and `LETTER.md`, if the `hatchery` folder one level up has
+   one) and done the privacy check in its step 2. If not: point them to it and stop here. The kit
    waits for that.
 2. Say in one line that this setup is for their home: personal account and machine only.
 3. Tell them the plan in five lines: install two tools → make their own repo folder → a short
@@ -66,23 +66,43 @@ Copy the kit's `template/` folder to it (`cp -r kit/template "<repo>"`). Show `l
 
 ## 3. A short interview (five questions, writes three files)
 
-Ask, one at a time, and write only what they say:
+Ask one at a time. For each, **say what it is for, give the examples, and offer the suggested default**
+so they never answer from a blank page; write only what they choose. "Skip" and "none" are answers.
 
-1. **What should I call you?** → replaces `<your-name>` in `<repo>/CLAUDE.md` (and in
-   `agents/ROUTING.md` / `roadmap/ROADMAP.md` where it appears).
-2. **Who must never get a message from an agent by accident?** A person, a family group chat, a
-   shared channel. Explain: the H1 gate refuses any command that names them. Help them pick names
-   that appear only in a send (a device name, a channel or chat name, an address) — a bare first
-   name also blocks reading files that mention the person. → `agents/guard.conf`, copied from
+1. **What should I call you?** Examples: a first name or a nickname. Suggest: the first name they use
+   in this chat. → replaces `<your-name>` in `<repo>/CLAUDE.md` (and in `agents/ROUTING.md` and
+   `roadmap/ROADMAP.md` where it appears).
+2. **Who must never get a message from an agent by accident?** Examples: a partner, a child, a
+   housemate, a family group chat, a team or club channel, a work chat, a mailing list. Suggest: everyone
+   they live with and any group chat they are in; adding a name is free, and `WALKTHROUGH.md` § Later
+   says how to loosen it. Explain: the H1 gate refuses any command that names them, so pick names that
+   appear only in a send (a device name like `pat-phone`, a channel or chat name, an address); a bare
+   first name also blocks reading files that mention the person. → `agents/guard.conf`, copied from
    `guard.conf.example`, `H1_PATTERNS='name1|name2'`. At least one entry; an empty one turns H1 off.
-3. **Is there a service whose API changes things you cannot undo** (a DNS provider, a domain
-   registrar)? → `H4_PROVIDER_HOSTS` in the same file, or leave the example value.
-4. **Do you use a password manager with a command-line tool?** → `SECRET_CLI=` in
-   `agents/estate.env`, copied from `estate.env.example`; empty is fine.
-5. **Anything the agent must never touch?** → one line under "Rules that do not bend" or "Local
-   facts" in `CLAUDE.md`, their words.
+3. **Is there a service whose API changes things you cannot undo?** Examples: the DNS provider or
+   registrar for a domain they own, a cloud backup or storage service, their router maker's cloud
+   console, a payment or banking API. Suggest: *none* if they own no domain or such account, and
+   say that is fine. Otherwise the API hostname of each (offer to look it up in the provider's docs).
+   → `H4_PROVIDER_HOSTS` in the same file; reads pass and writes ask. Leave the example value if
+   unsure. Also set `H4_ASK_PATTERNS` to empty unless they name their own "my hand" command (a deploy
+   script, a production cluster): the example value is a placeholder.
+4. **Where do your passwords live, and does it have a command-line tool?** Examples: a browser or
+   phone password manager (no CLI), or one with a CLI (`op`, `pass`, `gopass`, `rbw`). Suggest: write
+   the manager's name in `CLAUDE.md` under "Where secrets live" (a pointer, never a secret), and leave
+   `SECRET_CLI=` empty in `agents/estate.env` (copied from `estate.env.example`) unless they have a CLI
+   and want H2 to guard it.
+5. **What is irreplaceable, or must the agents never touch?** Examples: the photo library folder,
+   scanned documents, tax and finance records, family videos, anything that exists in only one place;
+   a door lock or alarm. Suggest: the folders that hold the only copy of anything. → folder paths into
+   `H4_NEVER_PATHS` in `guard.conf` (an agent cannot delete these even with a tap, so choose them with
+   care), plus one line under "Rules that do not bend" in `CLAUDE.md`, their words. Devices (locks,
+   alarms, cameras) are not paths: they go in `roadmap/home-setup.md` as `never`, which the first overlord
+   session asks about, so just note them for it.
 
-Everything else about their home is for the first overlord session, which starts with the home-setup interview (`roadmap/home-setup.md`: what they have, from a list of examples, and what the agents may do with each). Do not ask it here. Show them the three files when done.
+Everything else about their home is for the first overlord session, which starts with the home-setup
+interview (`roadmap/home-setup.md`: what they have, who depends on it, quiet hours, what is always on,
+and what the agents may do with each thing). Do not ask any of that here. Show them the three files
+when done.
 
 ## 4. git init and the first commit
 
@@ -189,4 +209,4 @@ Commit what changed in the repo (`git -C "<repo>" add -A` then `git -C "<repo>" 
   the agents may read, manage, or never touch.
 - What they did themselves today, and that it was theirs on purpose: the installs' admin prompt,
   reading the hooks, turning the plugin on, every restart.
-- How to undo it: `WALKTHROUGH.md` § Turning it off.
+- What to read next, only now: `WALKTHROUGH.md` (their first hour, what to do later, and § Turning it off to undo all of this).

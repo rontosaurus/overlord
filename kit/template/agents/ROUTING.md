@@ -34,11 +34,16 @@ Everything not on a list is **fair game** for any role, attended or unattended, 
 are the owner's; the overmind proposes changes, the owner edits them. Security is the one review that is a merge
 gate; everything else is a habit the overseer applies itself.
 
+The rows below are written for a homelab. **Keep the ones that match what `roadmap/home-setup.md` says
+you have, delete the rest, add yours**; the Kubernetes and media-library items apply only if you run
+them. The access words in `home-setup.md` can only make a thing stricter than these lists: `ask` is
+owner's hand, `never` is never, and `read` means look only.
+
 | List | Contents (edit to fit your setup) | Mechanism |
 |---|---|---|
 | **Never** — no mode bends it, not even a tap; the owner does these | sends to anyone (CLAUDE.md rule 4); a secret value in output, a file or a transcript; anything unattended that depends on a machine that is not always on; editing the decision log (the framework drafts an amendment, class F); money (purchases, subscriptions, plan changes); deleting the owner's own data (photos, documents, finance, anything marked keep) | H1 (sends); H2 (secrets); persona `tools:` lines; the harness classifier |
-| **Owner's hand** — the agent stages the exact command; the owner's explicit go runs it; unattended runs stage and stop | **the internet path:** gateway/WAN/firewall, DNS zones, the tunnel, TLS, the identity provider, the system namespaces · **core config of anything people rely on** (e.g. core config of home automation) · **storage:** arrays, pools, share layout, `pvc`/`pv`/namespace/storageclass/Secret deletes · **host power** · any `rm` or `find -delete` on a media mount (staging into a staging folder, e.g. `_to_delete/`, is fair game; the delete is the owner's) · any mutation by label selector or `--all` · git history (force push, reset or delete `main`) · `helm uninstall` | H4 shapes in the bash guard; the staged-deletion pattern |
-| **Fair game** — everything else | restarts, rollouts, scaling (to zero too), applies of a reviewed manifest, **named** pod/Job/Deployment/CronJob/ConfigMap deletes outside the system namespaces, service API writes, repo edits on a branch, docs, staged moves, package installs in a venv, timers and scheduled jobs that carry a tier | the three habits: **look before you touch**, **record the undo**, **log it** (`agents/bin/act`) |
+| **Owner's hand** — the agent stages the exact command; the owner's explicit go runs it; unattended runs stage and stop | **the internet path:** gateway/WAN/firewall, DNS zones, the tunnel, TLS, the identity provider, the system namespaces · **core config of anything people rely on** (e.g. a smart-home hub's core config) · **storage:** arrays, pools, share layout; if you run Kubernetes, `pvc`/`pv`/namespace/storageclass/Secret deletes · **host power** · any `rm` or `find -delete` on a media or backup mount (staging into a staging folder, e.g. `_to_delete/`, is fair game; the delete is the owner's) · any mutation by a selector or `--all` · git history (force push, reset or delete `main`) · `helm uninstall` (if you use it) · anything `home-setup.md` marks `ask` | H4 shapes in the bash guard; the staged-deletion pattern |
+| **Fair game** — everything else | restarts, rollouts, scaling (to zero too), applies of a reviewed manifest, (if you run Kubernetes) **named** pod/Job/Deployment/CronJob/ConfigMap deletes outside the system namespaces, service API writes, anything `home-setup.md` marks `manage`, repo edits on a branch, docs, staged moves, package installs in a venv, timers and scheduled jobs that carry a tier | the three habits: **look before you touch**, **record the undo**, **log it** (`agents/bin/act`) |
 
 **Hooks — hook-enforced, mechanical, everywhere.** Enforced by the plugin's hooks on every session
 once configured (`SETUP.md` step 6), interactive or headless. These are pattern matches over
@@ -62,7 +67,7 @@ which reviews it ran and, in one line each, why not the others.
 |---|---|---|
 | ingress, reverse proxy, tunnels, identity provider, TLS, network policy, firewall, a new internet-reachable surface, anything that reads or moves a token | **security** | **required** |
 | any incident, alert, "X is down", "is X working?" | **on-call** first, before anyone restarts anything | **required** |
-| a change the people who depend on this infrastructure would notice (media, home automation, shared services, DNS, <your-quiet-hours>) | the **stakeholder-impact habit**: check who is using it before restarting; prefer the quiet window for anything noticeable; no path that could reach anyone's device but the owner's. Run the persona for a second read on who is affected | habit |
+| a change the people who depend on this infrastructure would notice (media, home automation, shared services, DNS, or inside the quiet hours in `home-setup.md`) | the **stakeholder-impact habit**: check who is using it before restarting; prefer the quiet window for anything noticeable; no path that could reach anyone's device but the owner's. Run the persona for a second read on who is affected | habit |
 | a new or rewritten manifest, scheduled job, timer, image or data-moving script | the **optimization checklist** (placement, resources, scheduling, hygiene, cleanup, image entrypoint, never-move-without-a-file) applied by the overseer; the persona for a second read on a new image or a mover | habit |
 
 **Class F — top-model design review.** The overseer stops and the overlord dispatches `design-review` (or holds
@@ -86,8 +91,8 @@ message, not a review).
 | **Owner's hand** | attended: staged, then the owner's explicit go (a quoted `GO` block in the brief, or a permission prompt); unattended: staged under *Needs the owner* and stopped | the staged command in the report or the *Ask the owner* row; the go recorded in the row |
 | **Never** | nobody, in any mode | — |
 
-**The habits are the gate.** *Look before you touch:* read the target's live state first (`kubectl get -o wide`,
-`ls -la`, the API's GET); if it is not what the brief says it is (other owner, age, state, or a selector reaching
+**The habits are the gate.** *Look before you touch:* read the target's live state first (`ls -la`, `systemctl status`,
+the app's API GET, or `kubectl get -o wide` if you run a cluster); if it is not what the brief says it is (other owner, age, state, or a selector reaching
 past the named thing) stop and report a mismatch; a brief authorises the action as described, not whatever the name
 now points at. *Record the undo:* the exact command or file that restores the previous state, in the report. *Log
 it:* `agents/bin/act <initiative|-> "<what>" --undo "<how>" --proof "<path or command>"` for every non-read action.
@@ -157,24 +162,11 @@ The strategist (`agents/prompts/strategist.md`) is a procedure read as a file, n
 only `state/arc.md`, `priorities.md`, `next.md`, `threads.md` and `state/brief/`. The numbers in
 `ceiling.json` are starting values — tune them at the first overmind review after the tick has run a while.
 
-## 8. Evaluation (v2 — not shipped)
+## 8. Evaluation (not shipped)
 
-The framework measures itself with files and one command, `agents/bin/eval` (stdlib Python). Nothing
-here is a gate on a merge except the gate suite in pre-commit; the rest is evidence for the overlord's
-reading of a report and for the overmind's review.
-
-| What | Command | When | Output |
-|---|---|---|---|
-| **Gate regression** — every real block and every false positive ever recorded, run through the live bash guard | `eval gates` | pre-commit whenever the plugin's hooks or the cases change; any time | pass/fail per case (`agents/eval/gates/cases.txt`) |
-| **Report score** — shape, attestations that *exercise* vs only *inspect*, verify-with commands that would write, reviews implied by the change vs obtained, ask count, secret-shaped strings, run metadata, verifier result | `eval report <report.md>` | overlord, after verifying a report (save the verifier's table as `evals/reports/<stem>.verify.md` first) | `agents/state/evals/reports/<stem>.json` + flags |
-| **Golden defects** — frozen inputs from real misses replayed through the persona that should have caught them, at its own model row | `eval golden [--case id] [--persona p]` | overmind review; after any persona edit that claims to fix a miss | `agents/state/evals/golden/<ts>.json`, catch/miss with evidence |
-| **Scorecard** — drift by kind per week, gate-suite false positives, dispatch rate and days since the last report, cost per initiative, ask queue age, reports scored, golden catch rate over time | `eval rollup` | overmind review | `agents/state/evals/SCORECARD.md` |
-| **Cost ledger** — one row per dispatch on exit (turns, USD as the CLI reports it, duration, exit subtype), written by `dispatch` itself | — | every dispatch | `agents/state/costs.tsv` (committed; the file the circuit breaker reads) |
-
-Rules: a real miss becomes a golden case **before** the persona is edited, and a persona edit that
-does not move the catch rate is prose, not a fix. A hook false positive or negative becomes a gate
-case in the same commit as the hook change. Eval runs never write drift lines (`AGENT_EVAL=1`).
-Local knobs (section names, implied-review triggers, ask threshold) live in
-`agents/eval/config.json`; `EVAL_REPO=<path>` scores reports in the same shape in another repo.
-
-*v2 ships the tools (dispatch, ceiling, eval); in v1 you run these by hand/by reading.*
+The full framework measures itself with a gate regression suite, a report score, golden defects replayed
+through the personas and a scorecard (`agents/bin/eval`); none of it ships in the kit. What does ship
+is the gate suite (`plugin/hooks/check-gates.sh`) and the habit behind the rest: a real miss becomes a
+test case **before** the persona or hook is edited, and an edit that does not change what gets caught is
+prose, not a fix. A hook false positive or negative becomes a case in `plugin/hooks/cases.txt` in the
+same commit as the hook change.

@@ -11,11 +11,11 @@ You are the **design reviewer**, the framework's top-model gate. You are asked i
 is design-level (the Class F table in `agents/ROUTING.md`). Read the roadmap's decision log and the
 document being touched before judging.
 
-<!-- local facts: fill in -->
-- Where the decision log and the availability-tier model live in this project.
-- Where the owner's goals are written down (read them before judging).
-- What the owner has already decided and will not reopen.
-<!-- /local facts -->
+Before judging, read the decision log in `roadmap/ROADMAP.md` (what the owner has already decided and will
+not reopen), `roadmap/goals.md` (what the owner is working toward), the availability-tier rule in the
+project's `CLAUDE.md`, and `roadmap/home-setup.md` (what exists, and which things are `ask` or `never`).
+A design that needs a thing marked `never`, or that runs unattended on a thing marked `ask`, is a
+RETURN TO DESIGN.
 
 Hold the change to:
 - **The two lists (`agents/ROUTING.md` §2)** - anything on the never list is out; anything on the

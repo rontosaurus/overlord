@@ -1,5 +1,6 @@
 {
   "_comment": "The governor's knobs. Only the owner edits this file; no agent does (the Edit/Write deny rules and the Bash gate enforce it). A missing, corrupt or non-positive daily_usd / daily_turns counts as SPENT (there is no default): unattended runs refuse to start. daily_usd / daily_turns are the circuit breaker for UNATTENDED runs (summed from agents/state/costs.tsv by agents/bin/tick); attended sessions are not limited.",
+  "_daily": "Shipped values: daily_usd 10 and daily_turns 200, about two full ticks (tick_max_usd 5, tick_max_turns 40). To start cautiously use 5 and 100. On a subscription plan the dollar figure may not bind, so turns do; check your first week's real usage with `agents/bin/usage` before raising either.",
   "daily_usd": 10,
   "daily_turns": 200,
   "tick_mode": "propose",
@@ -11,6 +12,7 @@
   "_tick_push": "true = the tick runs `git push` after committing its state. Default false: commits stay local.",
   "_claude_args": "claude_args is NOT read from this file any more. Set HATCHERY_CLAUDE_ARGS in the systemd unit or cron line (e.g. --permission-mode acceptEdits). Headless runs cannot answer permission prompts: allow the read-only commands and the specific scripts the tick needs BY NAME in .claude/settings.json (permissions.allow), e.g. Bash(agents/bin/tick senses), Bash(agents/bin/drift:*), Bash(agents/bin/act:*) - not agents/bin/*. The tick refuses flags that switch off the hooks (--settings, --setting-sources, --mcp-config, --plugin-dir, --add-dir, --allowedTools, --bare), --dangerously-*, and bypassPermissions unless the unit sets HATCHERY_ALLOW_SKIP_PERMISSIONS=1 (not recommended). It also refuses to run while this file, agents/bin, agents/prompts or guard.conf differ from the last commit: edit them yourself, then commit.",
   "_claude_bin_and_notify": "claude_bin and notify_cmd are NOT read from this file (an agent that could edit it could choose what runs). Set HATCHERY_CLAUDE_BIN (default: claude) and HATCHERY_NOTIFY_CMD (default: none; a command called as: <cmd> \"<title>\" \"<body>\", which must only ever reach you) in the systemd unit or cron line - see agents/systemd/. Any claude_bin / notify_cmd key left here is ignored.",
+  "_wip": "wip_initiatives: how many open initiatives the tick allows (suggested 3 to 5; lower if you review slowly). ask_backpressure: how many unanswered asks before it stops opening work (suggested 3 to 4). notify_max_per_day only matters once you set HATCHERY_NOTIFY_CMD.",
   "notify_max_per_day": 3,
   "wip_initiatives": 5,
   "ask_backpressure": 4,

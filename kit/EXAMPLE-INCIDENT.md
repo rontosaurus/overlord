@@ -3,6 +3,9 @@
 **A RECONSTRUCTION - rebuilt from the committed record, to show the shape of the work; names, times
 and several details are changed or left out.** Host names here (`nas-one`, `media-box`, `hub-one`) are made up.
 
+Your home will not have these three machines. The shape is what carries over: see "Your version" at the
+end for how each step follows from the access words in your `roadmap/home-setup.md`.
+
 ## What happened
 
 A mains power event on day 1 took a NAS (`nas-one`) down and it did not come back. The
@@ -80,4 +83,22 @@ session-start line that reminds the overlord to route incidents to on-call first
 
 It cannot notice an outage by itself. It only acts when someone asks. Detection was the human's
 ("is the main app working?"). The owner's answer is a separate piece of work, a "senses" layer
-that watches and raises its hand, kept apart from the delegating framework on purpose.
+that watches and raises its hand, kept apart from the delegating framework on purpose. The kit ships
+the hook for it: small checks in `template/agents/senses.d/` (its README suggests one for each thing you
+list in `home-setup.md`, including "its share is mounted and not empty") that the optional daily tick runs.
+
+## Your version
+
+Swap in what you have; the access words decide who does what.
+
+| Step in the story | What it needs from your `home-setup.md` | Access word it follows |
+|---|---|---|
+| On-call diagnoses before anyone restarts anything | the storage, the machines and the UPS are listed | `read` (inspect only) |
+| Containment: scale the dependent apps to zero | the apps are listed as `manage` | `manage` (fair game, undo recorded) |
+| Powering the NAS back on | the NAS and "host power" | `ask` (staged; you do it or tap approve) |
+| Who would notice | the "Who depends on it" and "Quiet hours" sections | stakeholder-impact reads them |
+| A thing marked `never` (a lock, a camera) | | not probed; the diagnosis says it needs it |
+
+No NAS? The same story fits a router that dropped its settings, a backup disk that unmounted, or a hub
+that lost its radio: on-call first, contain what is fair game, stage what is not, and add a sense so
+the next one is noticed in minutes.

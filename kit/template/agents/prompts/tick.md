@@ -19,12 +19,14 @@ turns of them). Hitting it is a return, not a failure: write the brief with what
 
 0. `agents/bin/sessions` if it exists: another overlord live → write one *Last wake* line ("tick skipped:
    <session> live") and exit. Read `agents/bin/rehydrate` (the wake view of `agents/state/overlord.md`),
-   `roadmap/goals.md`, `tail -20 agents/state/activity.tsv`, `tail -20 agents/state/drift.log`, the newest
+   `roadmap/goals.md`, `roadmap/home-setup.md` (what exists and the access word of each thing),
+   `tail -20 agents/state/activity.tsv`, `tail -20 agents/state/drift.log`, the newest
    `agents/state/brief/*.md`.
 1. **Senses.** What broke since the last tick. The wrapper has already run every executable in
    `agents/senses.d/` and written the findings to `agents/state/senses.tsv` (TSV:
    `severity · what · evidence · fix-list · runbook`; `fix-list` is `fair`, `hand` or `never` per the lists (never /
-   owner's hand / fair game) in `agents/ROUTING.md` §2). Read that file; re-run a single sense only to confirm a finding. Also compare
+   owner's hand / fair game) in `agents/ROUTING.md` §2, following the thing's access word in `home-setup.md`:
+   `manage` -> fair, `ask` -> hand, `never` -> never). Read that file; re-run a single sense only to confirm a finding. Also compare
    `ls agents/state/reports/` with *Open initiatives*. Each finding is a row: what · evidence · which list its fix
    is on · runbook entry if any (`knowledge/runbooks.md`, when it exists).
 2. **Close.** Every *Open initiatives* row whose report says DONE and whose verify record exists moves to
@@ -56,6 +58,8 @@ turns of them). Hitting it is a return, not a failure: write the brief with what
   candidate comes from `goals.md`, a sense finding, or an owed row.
 - Every unattended action is an `act` line (`agents/bin/act`); a report whose *What changed* names an action with no
   `act` row is a miss against you.
+- A thing `home-setup.md` marks `read` you look at and report on; `ask` you stage; `never` you leave alone and
+  name in the brief. A thing it does not list you do not assume exists.
 - A hook or classifier denial is a row in the brief and a drift line (`agents/bin/drift`), never a second route.
 - Nothing leaves the owner's own devices and accounts. Notifications go only through the command given as
   `NOTIFY_CMD=` in the prompt (never one read from a file), and only when the prompt says `NOTIFY=on`.

@@ -1,63 +1,39 @@
-# Your first hour
+# After setup: your first hour
 
-No machine has to stay on for any of this. You need Claude Code. The setup session installs the rest
-(`git` with Git Bash on Windows, and `jq`), each with a prompt you approve.
+You have run the setup session (`START-HERE.md` step 3). It made a repo folder of your own from
+`template/`, wrote your answers into it, added three settings lines next to yours, and left the plugin
+**off** until you read the hooks and turned it on yourself. If you stopped before that, say "continue
+setup" in the `hatchery` folder. Platforms and what the gates cannot see are in `README.md` § Security.
 
-- **Windows:** use the desktop app's Code tab with a **Local** session (not WSL — plugins do not load
-  there), or a terminal. The hooks have been tested on Linux; on Windows they are checked by the gate
-  test at the end of setup, so trust that test, not this sentence.
-- **Linux:** the platform the hooks were tested on.
-- **macOS:** untested.
+From here, open **your repo folder**, not the kit, and type `/hatchery:overlord`. Nothing needs to stay
+on for any of this.
 
-## 1. Unpack and run the setup session (about 30 minutes)
+## 1. Tell the overlord what you have (about 10 minutes)
 
-Unpack the kit somewhere in your user folder. You get a folder called `hatchery`. Open **that folder**
-in Claude Code and say "set me up" (`START-HERE.md` in it says the same). Its `CLAUDE.md` points Claude at
-`kit/SETUP.md`, which walks you
-through, one step at a time:
-
-1. installing Git (with Git Bash) and `jq` if they are missing — then you restart the app once;
-2. copying `template/` to a repo folder of your own (outside the `hatchery` folder, outside OneDrive);
-3. five questions: what to call you, **who must never get a message by accident**, which services
-   must never be called unattended, whether you use a password-manager command line, and anything
-   the agent must never touch. The answers land in `CLAUDE.md`, `agents/guard.conf` and
-   `agents/estate.env`;
-4. `git init` and a first commit;
-5. three lines added to Claude Code's settings — shown to you first (only the lines added), never overwriting
-   what you have (`dropin/README.md` explains them). The plugin is listed but **off**;
-6. reading the hooks together, in plain words. Then **you** decide whether to turn the plugin on, and
-   you do it yourself (`/plugin`, or `claude plugin install hatchery@hatchery` in your terminal);
-7. a test where a gate refuses a command that names someone from your list. If it does not refuse,
-   setup says so and stops: the gates are off on this machine.
-
-Stop at any step; "continue setup" in a new session picks up where you left off.
-
-Things only you can do, on purpose: install the app and sign in, choose your privacy settings in
-your Claude account, approve each prompt (including a Windows admin prompt for Git), decide to turn
-the hooks on, and restart the app when asked.
+The first time, the overlord asks about your home setup and writes `roadmap/home-setup.md`: what you
+have (router, NAS, smart-home hub and so on, from a list of examples), who depends on it, quiet hours,
+what is always on, and for each thing whether the agents may `read` it, `manage` it, must `ask` first,
+or must `never` touch it. "I don't know" is a fine answer. Edit the file any time; a row you delete
+is a thing the agents stop assuming exists.
 
 ## 2. One page of roadmap (10 minutes)
 
-From now on, open **your repo folder**, not the kit. Open `roadmap/ROADMAP.md`. It has a status table
-and a **decision log**: choices you have made and do not want re-argued by an assistant that forgot
-the conversation. Write three to start, for example "backups go to the drive in the hall", "nothing
-is ever sent to another person without my say-so", "I own the router; the assistant only reads it".
-Mark them locked.
+Open `roadmap/ROADMAP.md`. Its **decision log** holds choices you do not want re-argued by an assistant
+that forgot the conversation. Write three to start (the file has examples to adapt) and mark them locked.
 
-## 3. Run `/hatchery:overlord` on one small real task (20 minutes)
+## 3. One small real task (20 minutes)
 
-Start Claude Code in your repo folder. The overlord stops if `agents/ROUTING.md` is not in the
-current folder.
-
-Pick something read-only and useful: "inventory what is running on my home network / my computer."
-The overlord will read its state, hand the looking to a scout, and come back with a report.
+Pick something read-only and useful: "inventory what is running on my home network / my computer", or
+"check the table in `home-setup.md` against what is really there". The overlord will read its state,
+hand the looking to a scout, and come back with a report. (The overlord stops if `agents/ROUTING.md` is
+not in the current folder.)
 
 ## 4. Read the report, then check it (10 minutes)
 
 Scroll to the **Attestations** table at the bottom. Choose one row and run its "Verify with" command
 yourself. Does it show what the row says it should? That habit is the whole framework in miniature.
-Then answer anything the overlord put under its asks. That list is where irreversible things wait
-for you.
+Then answer anything the overlord put under its asks: that list is where irreversible things wait for
+you.
 
 # Later
 
@@ -91,15 +67,15 @@ for you.
      `HATCHERY_CLAUDE_ARGS` unless the unit sets `HATCHERY_ALLOW_SKIP_PERMISSIONS=1` (not recommended), and it also
      refuses `--settings`, `--setting-sources`, `--mcp-config`, `--plugin-dir`, `--add-dir`, `--allowedTools` and `--bare`.
      It will not run while `ceiling.json`, `agents/bin`, `agents/prompts` or `guard.conf` differ from the last commit.
-     H7's shell side is a pattern match, not a sandbox: it misses `git checkout/restore/apply/am`, `curl -o`, `wget -O`, `tar -x`/`unzip`, a path held in a variable, a `cd` first, and anything written from inside an interpreter. For real protection make those files read-only to the agent's user.
+     H7's shell side is a pattern match, not a sandbox (what it misses is in `agents/ROUTING.md`, H7): make those files read-only to the agent's user.
      Sense scripts run only if they are committed and unchanged since HEAD: commit a new one yourself.
      Keep this repo private: the tick commits what it writes to `agents/state/` (briefs, drift, activity), which
      is a record of your work. Run logs (`agents/state/runs/`) and `senses.tsv` are git-ignored.
   4. Try it by hand: `agents/bin/tick senses`, then `TICK_DRY=1 agents/bin/tick`, then `agents/bin/tick`,
      and read the brief it writes.
-  5. Add your own checks yourself, as small executable scripts in `agents/senses.d/` (its README has the format).
+  5. Add your own checks yourself, as small executable scripts in `agents/senses.d/` (its README has the format and a "if you listed X" table of ideas keyed to `home-setup.md`).
   6. Schedule it with the examples in `agents/systemd/` (timer units, or the cron lines).
-  7. Put your own targets in `roadmap/goals.md`; the tick ranks work against them. After a week of
+  7. Put your own targets in `roadmap/goals.md` (it has examples with signals); the tick ranks work against them. After a week of
      briefs you agree with, set `tick_mode` to `act`.
 
 # Turning it off

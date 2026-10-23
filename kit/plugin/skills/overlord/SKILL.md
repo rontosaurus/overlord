@@ -35,21 +35,35 @@ into this project and stop.
 
 ## First session: the home-setup interview
 
-Ask the owner, one question at a time, and write only what they say into `roadmap/home-setup.md`:
+Ask the owner, one question at a time, and write only what they say into `roadmap/home-setup.md`. Give
+examples and a suggested default with every question so they never answer from a blank page; "I don't
+know" and "skip" are fine, and you write them down.
 
-1. **What do you have?** Offer the examples so they are not answering from a blank page: a router or
-   firewall, Wi-Fi access points, a NAS, a UPS, a smart-home hub (lights, locks, thermostat), an
-   always-on computer (mini PC, server, Raspberry Pi), a media server, cameras or a doorbell, a
-   printer, backups (local or cloud), domain names or a DNS provider, a password manager, their own
-   computer. For each: make and model if they know it, and how it is reached (an admin page, an app,
-   a cable to which machine). "I don't know" is a fine answer; write it down.
-2. **For each thing, how much may the agents do?** `read`, `manage`, `ask` or `never` (the table at
-   the top of the file says what each means). Suggest a default (read for most things; ask for the
-   router and anything internet-facing; never for locks, alarms, cameras and the password manager)
-   and let them choose. Things they would hate to lose (photos, documents) go on the never-delete
-   list as well (`H4_NEVER_PATHS` in `agents/guard.conf`).
-3. **What annoys you?** Breaks, nags, things to remember. These become the first initiatives.
-4. **What is always on?** Unattended work can only run there.
+1. **What do you have?** Offer the examples: a router or firewall, Wi-Fi access points, a NAS, a UPS, a
+   smart-home hub (lights, locks, thermostat), an always-on computer (mini PC, server, Raspberry Pi), a
+   media server, cameras or a doorbell, a printer, backups (local or cloud), domain names or a DNS
+   provider, a password manager, their own computer. For each: make and model if they know it, and how it
+   is reached (an admin page, an app, a cable to which machine).
+2. **For each thing, how much may the agents do?** `read`, `manage`, `ask` or `never` (the table at the
+   top of the file says what each means). Suggest the defaults already in the table (`read` for most
+   things; `manage` for an always-on computer or media server; `ask` for the router, a domain and anything
+   internet-facing; `never` for locks, alarms, cameras and the password manager) and let them choose. If
+   unsure, the stricter word.
+3. **Who else depends on it, and when are they around?** Examples: a partner who watches the media server
+   in the evening, kids on the Wi-Fi for school, a housemate on the printer. Suggest "just me" if they live
+   alone. Then quiet hours: suggest `22:00-07:00` quiet and heavy jobs `02:00-05:00`.
+4. **What annoys you?** Breaks, nags, things to remember (examples are in the file). These become the first
+   initiatives; suggest one or two.
+5. **What is always on?** Unattended work can only run there. Suggest "nothing yet" if nothing is.
+6. **What would you hate to lose?** Do not ask if `agents/guard.conf` already lists `H4_NEVER_PATHS` from
+   setup: copy those paths into "Things I would hate to lose" and ask only whether each has a backup.
+   Otherwise ask, and tell them agents never delete these but that adding the paths to `guard.conf`
+   (which an agent cannot edit) is theirs to do.
+7. **Optional: any goals?** Offer the examples in `roadmap/goals.md` and write only what they choose; no
+   goals is fine until they schedule the governor loop.
+
+For anything with an API that changes things they cannot undo (a domain registrar, a cloud service),
+remind them that its hostname belongs in `H4_PROVIDER_HOSTS` in `guard.conf`, which they edit themselves.
 
 Never ask for or write down a password, key or Wi-Fi passphrase; ask where it lives instead. Show
 them the file, commit it, then suggest the first initiative: a read-only inventory (`scout`) of the
@@ -58,7 +72,9 @@ things marked `read` or `manage`, which checks the table against what is really 
 ## Handling a request
 
 - **Route by list, not by class.**
-  - Reading, inventory, "where does X live" -> `scout`.
+  - Reading, inventory, "where does X live" -> `scout`. Whatever the route, check the target's access word in
+    `roadmap/home-setup.md`: `manage` -> a `worker` may act (fair game); `ask` -> stage it in the Ask table;
+    `never` -> hand the owner the exact command and stop.
   - Incident, alert, or any question of the form "is X working?" / "X is down" -> `on-call` first,
     before anyone restarts anything and before any by-hand diagnosis of your own.
   - A bounded fix, or executing a change (attended applies, a staged command) -> one `worker` directly. **Fair

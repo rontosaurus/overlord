@@ -6,8 +6,8 @@ it is a plan plus the things the plan produces.
 
 ## Read this before acting
 
-**[`roadmap/ROADMAP.md`](roadmap/ROADMAP.md) is the spine.** Read it (your copy lives at
-`<your-roadmap-path>`), then read the one spec you are executing. Specs carry their own context; you
+**[`roadmap/ROADMAP.md`](roadmap/ROADMAP.md) is the spine.** Read it, then read the one spec you are
+executing. Specs carry their own context; you
 do not need the original conversation. Each spec's `Status:` line and Log say exactly where the last
 session stopped.
 
@@ -34,10 +34,10 @@ how to use it. Open a session and run `/hatchery:overlord` (or `/overlord`) to s
 
 ## Local facts
 
-Fill these in; the framework reads them to judge impact.
+What the framework reads to judge impact. Most of it is in one file so it is asked once:
 
-- **What runs where:** [`roadmap/home-setup.md`](roadmap/home-setup.md) — what you have and what agents may `read`, `manage`, must `ask` about, or must `never` touch (the overlord's first session fills it in with you)
-- **Who depends on it:** <names of the people who depend on this infrastructure> — <what they use>
-- **Quiet hours / do-not-disturb windows:** <HH:MM–HH:MM> — nothing noisy or restarting then
-- **Always-on vs sometimes-on:** <which machines may be off; nothing unattended depends on those>
-- **Where secrets live:** <your secret manager or password vault> (pointers only)
+- **What runs where, who depends on it, quiet hours, what is always on, what must never be deleted:**
+  [`roadmap/home-setup.md`](roadmap/home-setup.md), with what agents may `read`, `manage`, must `ask`
+  about, or must `never` touch. The overlord's first session fills it in with you.
+- **Where secrets live:** <name of your password manager or vault, e.g. "the password manager app on my
+  phone", "a `pass` store"> (a pointer only, never a value)

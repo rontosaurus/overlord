@@ -6,8 +6,12 @@ The spine of this repo. Read it, then read the one spec you are executing.
 
 | Phase | Spec | Status | Last touched |
 |---|---|---|---|
-| 01 Inventory what runs in my home lab | [`specs/01-example.md`](specs/01-example.md) | not started | YYYY-MM-DD |
+| 01 Inventory what I have, checked against `home-setup.md` | `specs/01-inventory.md` (the overlord writes it) | not started | YYYY-MM-DD |
 | <next phase> | `specs/<NN>-<name>.md` | | |
+
+*Phases people start with, as examples: a tested backup restore; naming and documenting the network; a
+UPS that shuts things down cleanly; a monitoring check on the thing that bit you last; moving one chore
+off your own attention. Suggested default: just row 01 until it is done.*
 
 ## Decision log
 
@@ -17,7 +21,12 @@ step cannot proceed as written, log the blocker and stop.
 
 | # | Decision | Why | Date | LOCKED? |
 |---|---|---|---|---|
-| | | | YYYY-MM-DD | |
+| 1 | *(example)* Backups go to the drive in the hall. | one place to check and to restore from | YYYY-MM-DD | yes |
+| 2 | *(example)* Nothing is ever sent to another person without my say-so. | a send cannot be taken back | YYYY-MM-DD | yes |
+| 3 | *(example)* I own the router; the assistant only reads it. | an outage there takes the whole home down | YYYY-MM-DD | yes |
+
+*Replace the examples with three of your own; if you have none yet, write those three. A decision is
+worth logging when you would be annoyed to see it re-argued.*
 
 ## How a spec works
 

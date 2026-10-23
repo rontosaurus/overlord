@@ -1,5 +1,5 @@
 {
-  "_comment": "Config for agents/bin/strategist. timezone: an IANA name used for stamps and the weekly hour (falls back to UTC if the system has no tz database). weekly_first: YYYY-MM-DD of the first weekly check-in; empty = the WEEKLY CHECK-IN DUE alarm is off. weekly_dow/weekly_hour: when the weekly hour is (0=Mon..6=Sun; default Sunday 19:00). outside: extra [path, name] pairs whose Status:/Live: line should appear in arc.md under 'Outside the phases'.",
+  "_comment": "Config for agents/bin/strategist. timezone: an IANA name (for example Europe/London, America/New_York, Australia/Sydney) used for stamps and the weekly hour (falls back to UTC if the system has no tz database). weekly_first: YYYY-MM-DD of the first weekly check-in; empty = the WEEKLY CHECK-IN DUE alarm is off. weekly_dow/weekly_hour: when the weekly hour is (0=Mon..6=Sun; default Sunday 19:00). outside: extra [path, name] pairs whose Status:/Live: line should appear in arc.md under 'Outside the phases' (for example [\"notes/garden.md\", \"Garden project\"]). Suggested start: your own timezone, weekly_first empty (no weekly alarm), weekly_hour an hour you are usually at the computer, outside empty.",
   "timezone": "UTC",
   "weekly_first": "",
   "weekly_dow": 6,

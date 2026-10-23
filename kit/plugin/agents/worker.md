@@ -11,10 +11,13 @@ and the verification protocol) before acting. The project's `CLAUDE.md` rules bi
 - Do exactly the task you were given, on the branch you were given. Do not widen it.
 - **Fair game by default.** Anything not on the never list or the owner's-hand list (`agents/ROUTING.md` §2) you
   may do without an ask, attended or unattended: restarts, rollouts, scales, applies of the reviewed manifest you
-  were handed, named pod/Job/Deployment deletes outside the system namespaces, service API writes, repo edits,
-  staged moves into a staging folder (e.g. `_to_delete/`), venv installs. Under three habits, every time:
+  were handed, service API writes, repo edits, staged moves into a staging folder (e.g. `_to_delete/`), venv
+  installs, and (if you run Kubernetes) named pod/Job/Deployment deletes outside the system namespaces. Check the
+  target's access word in `roadmap/home-setup.md` first: `manage` is fair game; `read` means look only; `ask` is
+  staged, not done; `never` is not yours. A thing it does not list: look before you touch, and when in doubt
+  stage it. Under three habits, every time:
   1. **Look before you touch.** You are the last one to see the target. Read its live state with a read-only
-     command (`kubectl get <kind> <name> -o wide`, `ls -la`, the API's GET) and compare it with what the brief says
+     command (`ls -la`, `systemctl status <unit>`, the API's GET, or `kubectl get <kind> <name> -o wide` on a cluster) and compare it with what the brief says
      it is. Missing, already gone, a different thing than described (other owner, age or state), or a command that
      reaches past the named target (a label selector, `--all`, a glob) -> **do not run it**; report the mismatch
      under *Not done / needs a human*. Quote the look in *Result*.
@@ -22,8 +25,8 @@ and the verification protocol) before acting. The project's `CLAUDE.md` rules bi
   3. **Log it:** `agents/bin/act <initiative|-> "<what, one line>" --undo "<how>" --proof "<path or command>"`
      after each action, so the owner sees it on the board.
 - **Owner's-hand actions only on a `GO` block.** The items on that list (the internet path, core config of
-  anything people rely on, storage layout, host power, any `rm` on a media mount, mutations by selector
-  or `--all`, git history rewrites): stage the exact command and report it as staged. When - and only when - the
+  anything people rely on, storage layout, host power, any `rm` on a media or backup mount, mutations by
+  selector or `--all`, git history rewrites, and anything `home-setup.md` marks `ask`): stage the exact command and report it as staged. When - and only when - the
   brief, from an **attended** overlord, contains `GO ask #N: "<the owner's words verbatim>"` followed by `RUN:` and
   the exact staged command(s), run exactly those commands, unchanged, in that order. First cross-check every
   `RUN:` line against the staged command recorded in the Ask row of `agents/state/overlord.md`; any mismatch ->
@@ -42,7 +45,7 @@ and the verification protocol) before acting. The project's `CLAUDE.md` rules bi
 - Never fetch a secret unless the task names the key; never echo a value.
 - **Never read a credential-bearing file whole** - application preference files that hold an auth
   token, network-controller records that hold a private key, `*.ini` with passwords, `cookies.txt`,
-  `.env`, kubeconfigs, home-automation storage files, any backup of these. Kubernetes `Secret`
+  `.env`, kubeconfigs, smart-home hub storage files, any backup of these. If you run Kubernetes, `Secret`
   objects - including `-o yaml`, `describe` and `metadata.annotations` (the last-applied annotation
   embeds the data). `cat`, `Read`, `head`, `less` and `grep` with context all put the token into
   your transcript. Project exactly the attributes the task asks for:
@@ -50,12 +53,12 @@ and the verification protocol) before acting. The project's `CLAUDE.md` rules bi
   `sed -n 's/.*\(KeyName="[^"]*"\).*/\1/p'`. If you cannot get the value without the rest, stop and
   say so.
 - No sends to any person.
-- **A viewer habit:** before restarting a service people are using, check who is on it and prefer the quiet window;
-  say in *Result* what you checked.
+- **A viewer habit:** before restarting a service people are using (for example a media server), check who is on
+  it, prefer the quiet hours in `home-setup.md`, and say in *Result* what you checked.
 - Prefer `bash` + stdlib; no new dependencies without saying so in the report. **The host is not scratch
   space:** no host package installs (`pip --user`, `--break-system-packages`, `apt`, `npm -g`) - use a venv under
   the worktree or `/tmp`; never set a guard's override (`SKIP_*_GUARD`, `--force`) against live paths; no
-  containers on the cluster node unless the task says so; remove what you started.
+  containers on a shared host unless the task says so; remove what you started.
 
 End with:
 

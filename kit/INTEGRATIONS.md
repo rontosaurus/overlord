@@ -7,7 +7,8 @@ of it switched on) or **Could** (a fit for the framework that I have not built).
 claim here is not marked, treat it as **Could**.
 
 Nothing here ships in the kit except the framework. The apps are described so you can see the
-pattern, not so you can copy a deployment.
+pattern, not so you can copy a deployment. Which of them apply to you is whatever your own
+`roadmap/home-setup.md` says you have, and at what access level.
 
 ## 1. How capabilities arise
 
@@ -496,8 +497,9 @@ state with the brief, and stop on a mismatch.
 call a webhook that wakes a one-shot session. The tick's wake kinds are a small list in a file. Keep
 the alarm in the other system, off the box it watches.
 
-**Phone push via a notify command.** The kit sends nothing by default. If you set `notify_cmd` in the
-ceiling file, the tick may use it, up to `notify_max_per_day`, and only to reach you. Make your command
+**Phone push via a notify command.** The kit sends nothing by default. If you set `HATCHERY_NOTIFY_CMD`
+in the tick's systemd unit or cron line (not in `ceiling.json`, which the agent could otherwise steer),
+the tick may use it, up to `notify_max_per_day`, and only to reach you. Make your command
 refuse any target but your own, and keep a per-channel vocabulary (asks, alerts, info) so the
 notification light means something.
 
