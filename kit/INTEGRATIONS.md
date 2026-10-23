@@ -1,9 +1,9 @@
 # What you can build on it
 
 The framework is plumbing: roles, two lists, hooks, attestations, ceilings, a log. This page is about
-what that plumbing lets you point agents at. Everything below is drawn from the author's self-hosted
-homelab. Each item is marked **Runs** (the author uses it), **Built** (written and reviewed, not all
-of it switched on) or **Could** (a fit for the framework that the author has not done). If a
+what that plumbing lets you point agents at. Everything below is drawn from my self-hosted
+homelab. Each item is marked **Runs** (I use it), **Built** (written and reviewed, not all
+of it switched on) or **Could** (a fit for the framework that I have not built). If a
 claim here is not marked, treat it as **Could**.
 
 Nothing here ships in the kit except the framework. The apps are described so you can see the
@@ -21,9 +21,9 @@ Each capability below is a consequence of one or two framework pieces, not a fea
 | State in files, plus the governor loop (`tick`) | Long-running services with memory: a daily job reads its own files, acts, writes them back, exits. Idle costs nothing. |
 | A cost ceiling in a file plus model routing | Work with a spend bound. The cheap tier reads, the mid tier does, the top tier is rationed, and a ceiling the agent cannot edit stops the loop. |
 | Drift log plus the overmind review | A system that improves from its own failures. Every block, waiver and slip is a counted line, and the review turns counts into rule changes. |
-| **Always-on infrastructure primitives** (network, DNS and tunnel provider, secrets manager, Kubernetes, NAS, identity provider, git forge, phone path, detection loop) | The **app platform** (section 4). With the pieces above in place and each reachable through a scoped API, an idea talked through with the overlord can be built, wired, backed up and monitored by the framework, with the owner approving a few named steps. |
+| **Always-on infrastructure primitives** (network, DNS and tunnel provider, secrets manager, k3s, NAS, identity provider, git forge, phone path, detection loop) | The **app platform** (section 4). With the pieces above in place and each reachable through a scoped API, an idea I talk through with the overlord can be built, wired, backed up and monitored by the framework, with me approving a few named steps. |
 
-Read left to right and you get the order the author built things in: verification first, then
+Read left to right and you get the order I built things in: verification first, then
 exposure, then unattended work, then services with memory and a budget, then self-review, and finally the platform that lets you ask for a whole service.
 
 ## 2. Integration catalogue
@@ -59,8 +59,8 @@ scans, with the owner approving in batches.
 A bulk-media array, a durable NAS that holds the git origin and backups, and a UPS monitored over
 the network from each machine it powers. Agents read mounts, SMART, array state and UPS history, and produce
 the diagnosis. Array start/stop, share layout and host power are owner's-hand; the framework stages
-the exact steps. The incident in section 6 is this one. Persona: **on-call**. The lesson the
-author keeps: network mounts that drop present as empty directories, not errors, so every dependent
+the exact steps. The incident in section 6 is this one. Persona: **on-call**. The lesson I
+keep relearning: network mounts that drop present as empty directories, not errors, so every dependent
 app looks healthy and empty.
 
 ### Network segmentation and device inventory (Built)
@@ -72,7 +72,7 @@ controller's client list against the inventory, reported as drift.
 
 ### Self-hosted git forge (Runs)
 A private forge holds mirrors of repos, with sign-in required, registration closed, and the built-in
-CI features turned off to cut surface and disk. The author's "CI" is the pre-commit hook: a secret
+CI features turned off to cut surface and disk. My "CI" is the pre-commit hook: a secret
 scan, a rule that code changes need a doc change, and the gate regression suite when hooks change.
 Agents do all the git: branch per initiative, fast-forward merge after verification, push at session
 end. Owner's hand: history rewrites and deleting or resetting the main branch (hook-asked).
@@ -152,8 +152,8 @@ to someone else cannot be taken back, so it is a permission, not a preference.
 (it prints every value), a fetched value redirected or piped into `cat`/`tee`/`echo`, and a
 secrets project other than the one granted. The credential-file rule rides in every worker prompt:
 never read a credential-bearing file whole; project exactly the attribute asked for with `grep -o`
-or `jq 'del(.secret_field)'`. A pre-commit scan catches secret-shaped strings. The honest part: the slip recurred in the
-author's log (values reaching a local transcript or file), which is why the rule is in every prompt
+or `jq 'del(.secret_field)'`. A pre-commit scan catches secret-shaped strings. The honest part: the slip recurred in
+my log (values reaching a local transcript or file), which is why the rule is in every prompt
 and a golden case, not one.
 
 **Domain separation.** Three domains with three jobs: one for identity and people, one for commerce
@@ -161,9 +161,8 @@ and a golden case, not one.
 infrastructure domain, no service on a mail domain. A new hostname that crosses it fails review as a rule.
 
 **LAN-only pages with no login, versus internet-facing ones behind SSO.** A read-mostly status or
-digest page on the LAN has no login when it sits on a trusted network segment and holds only content fit for anyone on it. It is only used for content the author is content for anyone on that
-network to read, and the security review checks the content (it once caught a private contact claim
-that would have appeared on the page). Anything reachable from the internet carries an identity
+digest page on the LAN has no login when it sits on a trusted network segment and holds only content fit for anyone on it,
+and the security review checks the content before it is published. Anything reachable from the internet carries an identity
 gate in front, with a per-user passkey, and an admission rule before it is allowed through.
 
 **Opt-out automation that drafts and never sends.** The privacy-rights tool prepares the letter,
@@ -176,12 +175,12 @@ auto-replaced. Each edition carries its own allow list, so terms allowed in one 
 
 ## 4. An app platform: from an idea to a running service
 
-The framework alone is plumbing. What turns it into a platform is what it is plugged into. The
-author's setup has a handful of always-on infrastructure primitives, each reachable by an agent
-through an API or a command, each with a scope. Together they mean the owner can think an idea
+The framework alone is plumbing. What turns it into a platform is what it is plugged into. My
+setup has a handful of always-on infrastructure primitives, each reachable by an agent
+through an API or a command, each with a scope. Together they mean I can think an idea
 through with the overlord and have the pieces **built, wired, backed up and monitored by the
-framework**, with the owner approving a few named steps. This section says which
-primitives, what the flow looks like, where the owner's hand still is, and two real examples.
+framework**, with me approving a few named steps. This section says which
+primitives, what the flow looks like, where my hand still is, and two real examples.
 
 ### The primitives
 
@@ -190,7 +189,7 @@ primitives, what the flow looks like, where the owner's hand still is, and two r
 | **The network**: a gateway, LAN DNS, segments | Reads and (through staged, reviewed steps) writes names and address reservations. A new service gets a LAN name by default. |
 | **A DNS and outbound-tunnel provider**, reached through its API with a scoped token | Creates records for a new name. The token is limited to the one zone it needs, is fetched in-process, and every write is a staged exact command. |
 | **A secrets manager**, read by the agents in-process | A machine account scoped to one project. A worker creates or reads a service's keys from it without printing them. Vault-unlock material lives in a different project that account can never be granted. |
-| **An always-on single-node Kubernetes** (k3s) | Where containers run. Manifests are written to a convention: pinned image digest, non-root, no service-account token, a network policy per pod, an ingress with a wildcard certificate already in place. |
+| **An always-on single-node k3s cluster** | Where containers run. Manifests are written to a convention: pinned image digest, non-root, no service-account token, a network policy per pod, an ingress with a wildcard certificate already in place. |
 | **A NAS** for durable state and backups | A nightly backup job per service writes there, retention is set, and the restore is drilled. The tier decides whether a service is backed up at all. |
 | **An OIDC identity provider with passkeys** | Single sign-on and a forward-auth gate in front of any app that people outside the house will use; a per-app client is registered by an API call. |
 | **A self-hosted git forge** | The system of record: one branch per initiative, merge after verification, every change recorded with its undo. |
@@ -199,7 +198,7 @@ primitives, what the flow looks like, where the owner's hand still is, and two r
 
 ### The flow
 
-1. **Think it through.** The owner and the overlord talk the idea through until it is a brief:
+1. **Think it through.** The overlord and I talk the idea through until it is a brief:
    what it is for, who uses it, what it stores, and an **availability tier** (rule: every new
    service gets one at design time, and the tier decides placement and backup).
 2. **Design review**, for a new service or a new design. A read-only reviewer reads the brief and
@@ -216,14 +215,14 @@ primitives, what the flow looks like, where the owner's hand still is, and two r
 6. **Merge and apply**, then **the loop watches it**: its sense runs, its alarm is armed, its
    backup shows up on the NAS, and a failure goes to the on-call role like any other.
 
-**Where the owner's hand still is.** Be honest about it: the internet path (gateway, DNS and
+**Where my hand still is.** Honestly: the internet path (gateway, DNS and
 tunnel writes, certificates), the identity provider's core, storage layout and the mover,
 irreversible deletes, and anything that sends something to a person. These are on the owner's-hand
 list, and the framework does not do them on its own. It shrinks each to one tap: the worker
-prepares the exact command, stages it, and stops; in an attended session the owner approves that
+prepares the exact command, stages it, and stops; in an attended session I approve that
 command on a phone prompt, or answers an *ask* row with a stated reply phrase. Everything not on
 the two lists (never, owner's hand) is fair game, under the three habits: look at live state first,
-record the exact undo, log the action. "Largely without oversight" means exactly that: the owner's
+record the exact undo, log the action. "Largely without oversight" means exactly that: my
 oversight is the idea at the start, a few taps along the way, and the alarms afterwards.
 
 LAN-only is the default for anything new. Anything reachable from the internet sits behind the
@@ -232,7 +231,7 @@ is refused.
 
 ### Example 1: a game-library app
 
-*The idea.* The owner wanted a browsable library for a collection of game files that were scattered
+*The idea.* I wanted a browsable library for a collection of game files that were scattered
 across the NAS, and to use it away from home.
 
 *Pieces built, in one working day.* A research pass produced a fact sheet on the app's stack and
@@ -245,7 +244,7 @@ a LAN name; and a runbook with the staged steps for later. The design reviewer a
 and the security reviewer approved with changes (no service-account tokens, a hardened security
 context, a fail-closed procedure for the later exposure step); a second round folded all of them.
 
-*The owner's taps.* Opening the work ("now, this one"); one phrase to apply; then two things by
+*My taps.* Opening the work ("now, this one"); one phrase to apply; then two things by
 hand in a browser: creating the first admin account and starting the first library scan, outside
 busy hours. Nothing else in the build.
 
@@ -266,7 +265,7 @@ owner's hand (storage layout), with the exact UI steps written. The two reviewer
 conditions; every condition became either a change in the manifests or a named stop-check in the
 apply order. Later, small asks were one-line changes: raise the quota, simplify the page.
 
-*The owner's taps.* The idea; answers to a few questions in the report (each with a reply phrase);
+*My taps.* The idea; answers to a few questions in the report (each with a reply phrase);
 creating the share and its user on the NAS by hand; one approval for the public DNS record,
 given in an attended session; the signed-in browser checks that need a real passkey; and sending
 the friend their sign-up link, which is on the never list. The design was ready the same day; the
@@ -301,7 +300,7 @@ reads or moves a token. The reviewer is read-only and returns approve, approve-w
 or block. The overseer can skip other reviews with a stated reason; it cannot skip this one.
 
 **LAN-only is the default.** Exposure is opt-in per service, and an opt-in names what the third
-party in the path learns. The author's classes:
+party in the path learns. My classes:
 
 - **LAN only.** Static DNS in the gateway, a wildcard certificate (so the names never reach a
   public certificate log), no public record. The default.
@@ -321,7 +320,7 @@ hard-availability (receiving mail; break-glass access), which is *not self-hoste
 cannot be added without a tier, and the tier fixes where it may run and what backup it owes
 (restore-tested, with a written cold-standby runbook).
 
-**A machine that isn't always on can't host anything unattended.** The author's desktop PC, which is
+**A machine that isn't always on can't host anything unattended.** My desktop PC, which is
 switched off most of the time, is the standing example: no scheduled session, no timer, no service, because "the always-on box" was a
 claim nobody could keep true. It may be a client or a last resort, flagged as one.
 

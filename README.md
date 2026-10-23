@@ -100,7 +100,7 @@ marked as run, built, or merely possible:
 
 **The app platform.** The part I find most useful is not any one integration but what
 they add up to. My deployment has always-on primitives, each reachable through a scoped API: a
-network with LAN DNS, a DNS and tunnel provider, a secrets manager, a single-node Kubernetes, a NAS
+network with LAN DNS, a DNS and tunnel provider, a secrets manager, an always-on single-node k3s cluster, a NAS
 for backups, an OIDC identity provider with passkeys, a self-hosted git forge, an owner-only phone
 path, and a detection-and-remediation loop. With those in place, an idea I talk through with the
 overlord becomes a brief with an availability tier, a design review, workers that write the
