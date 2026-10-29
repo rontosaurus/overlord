@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # note-to-overmind "<message>"  — append to the overlord→overmind channel (append-only)
 set -u
+usage() { echo "usage: note-to-overmind <message>   (-h/--help prints this; a first word starting with a dash is refused, never logged)"; }
+case "${1:-}" in -h|--help) usage; exit 0;; -?*) echo "note-to-overmind: unknown option '$1'" >&2; usage >&2; exit 2;; esac
 f="${AGENTS_REPO:?set AGENTS_REPO}/agents/state/notes-to-overmind.md"
-[ $# -ge 1 ] || { echo "usage: note-to-overmind <message>" >&2; exit 1; }
-printf -- '- %s (%s%s) — %s\n' "$(date +%F)" "${AGENT_ROLE:-interactive}" "${AGENT_INITIATIVE:+/$AGENT_INITIATIVE}" "$*" >> "$f" && tail -1 "$f"
+[ $# -ge 1 ] || { usage >&2; exit 1; }
+# One call, one line: a newline in the message (or in the role/initiative env) would start a second line, and a second line
+# that begins with an overmind-review marker would reset the review clock. Fold line breaks to spaces, as act does.
+fold() { printf '%s' "$1" | tr '\n\r' '  '; }
+printf -- '- %s (%s%s) — %s\n' "$(date +%F)" "$(fold "${AGENT_ROLE:-interactive}")" "$(fold "${AGENT_INITIATIVE:+/$AGENT_INITIATIVE}")" "$(fold "$*")" >> "$f" && tail -1 "$f"

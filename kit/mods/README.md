@@ -5,3 +5,4 @@ Mods here are **optional and off by default**; read one and run `claude plugin v
 
 - `overlord-board/` — your work board above the prompt and a `/board` pane, read from the local `board.json` that
   `agents/bin/board` writes. It needs `AGENTS_REPO` set (it never reads or runs anything from the working directory). See its README.
+  Headed blocks (OVERLORD, Priorities, Overmind review, Alarms) that collapse to heading plus first lines in a short terminal, and an alarm row for guard denies on attended sessions in the last 15 minutes.

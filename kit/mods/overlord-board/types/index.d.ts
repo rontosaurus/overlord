@@ -2,6 +2,11 @@
 // never the whole document. The board script has already withheld secret-shaped text before it wrote the file.
 export type Row = { n: string; slot: string; what: string; next: string }
 export type Thread = { thread: string; on: string; since: string }
+export type Review = {
+  lastReview: string // 'YYYY-MM-DD' of the last overmind review marker; '' when there is none yet
+  daysSince: number | null // whole days since that marker; null when there is none
+  debriefsSince: number | null // debriefs dated on or after it; null when there is no marker or no debriefs folder
+}
 export type Board = {
   renderedEpoch: number // unix seconds the board was last rendered
   lastWake: string
@@ -23,6 +28,8 @@ export type Board = {
   errors: number // sections or rows the board could not parse
   wipInitiatives: number // limit from ceiling.json (default 5)
   askBackpressure: number // limit from ceiling.json (default 4)
+  recentDenies: number // alarms.recent_denies: guard denies on attended sessions in the last 15 minutes (0 when absent)
+  review: Review | null // null when board.json has no review block (no notes-to-overmind.md)
 }
 
 declare module 'claude-code' {

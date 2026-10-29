@@ -1,6 +1,6 @@
 {
   "name": "hatchery",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A small framework for running your personal infrastructure with Claude Code: an overlord skill that delegates to subagents, an overmind skill that reviews the framework itself, specialist reviewer personas, and hook gates that block dangerous commands.",
   "author": {
     "name": "rontosaurus"

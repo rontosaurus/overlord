@@ -153,7 +153,7 @@ none of it. <your-name> flips `tick_mode` to `act` after reading a week of brief
 | **Two tries, then ask** | A brief that fails twice (budget-kill, no report, failed attestations) goes to the Ask table — never a third dispatch with a bigger budget. |
 | **Done is stated up front** | A brief names the attestations its report must prove. A report without them is "reported, unverified" and counts as a failed try. |
 | **Noop is success** | A tick that finds nothing to close, fix, finish or open writes a short brief and one *Last wake* line and exits. It never invents work: candidates come only from `goals.md`, a sense finding or an owed row. |
-| **Notifications** | None by default. If `notify_cmd` in `ceiling.json` is set, the tick may use it (at most `notify_max_per_day`), and only to reach <your-name>. |
+| **Notifications** | None by default. If `HATCHERY_NOTIFY_CMD` is set in the systemd unit or cron line (outside the repo, where no agent can edit it), the tick may use it (at most `notify_max_per_day` from `ceiling.json`), and only to reach <your-name>. The command is never read from a file an agent can edit. |
 | **Cadence** | Daily, before <your-name>'s day (`agents/systemd/` has timer and cron examples), plus a weekly strategist hour (`tick weekly`). |
 | **Transitions, not states** | A tick surfaces what changed since the last one; it never re-raises an open ask. |
 | **Size** | `agents/bin/rehydrate` prints the ≤6 KB wake view and an OVER CAP alarm when a file passes its `size_caps` entry; `agents/bin/archive-state --apply` (dry run by default, lossless) trims `overlord.md`. |
@@ -170,3 +170,9 @@ is the gate suite (`plugin/hooks/check-gates.sh`) and the habit behind the rest:
 test case **before** the persona or hook is edited, and an edit that does not change what gets caught is
 prose, not a fix. A hook false positive or negative becomes a case in `plugin/hooks/cases.txt` in the
 same commit as the hook change.
+
+## 9. Session lifecycle
+
+| Rule | Detail |
+|---|---|
+| **Close-out** | An attended overlord or overmind session ends by answering the five questions in `agents/prompts/debrief.md` into `agents/state/debriefs/<YYYY-MM-DD>-<role>-<first 8 of the session id>.md` (before `agents/bin/usage session`, if you run it). Nobody grades them; the overmind reads them at each review, and two debriefs naming the same friction get an edit. |

@@ -37,3 +37,7 @@ Return:
 ## What I could not assess
 ```
 Be specific and short. A BLOCK must name the principle violated.
+
+Hooks that are parsed rather than sandboxed (the shell guard and any role guard) are judged against honest mistakes
+and drift, not against a hostile or prompt-injected model. A bypass only a deliberately adversarial agent would build
+is a note, not a BLOCK.

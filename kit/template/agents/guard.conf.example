@@ -22,10 +22,14 @@
 H1_PATTERNS='<never-message-this-person>|<other-shared-channel>'
 
 # H4_NEVER_PATHS (deny) - folders whose contents an agent may never delete, in any mode, not even with your
-# tap: `rm -r` or `find ... -delete` naming one is blocked. Photos, documents, finance, anything you keep
-# the only copy of. Examples: the photo library, scanned documents, tax and finance records, family
-# videos, a "keep" folder. Suggested default: every folder that holds the only copy of something; also
-# list them in roadmap/home-setup.md ("Things I would hate to lose"). Empty = off. LIMIT: it matches paths NAMED in the command (`rm -rf /path/to/photos/x`,
+# tap. A command that names one is blocked when it is: `rm -r` (flags before or after the path, -r/-R/-rf/
+# --recursive), `xargs rm -r` fed from a command that names the folder, `find ... -delete`, `find ... -exec rm`
+# or `-ok rm`, `rsync --delete*` or `--remove-source-files`, `unlink`, or `shred`. (A `rsync --delete` that
+# only READS from such a folder is blocked too; the guard cannot tell source from destination.) Photos,
+# documents, finance, anything you keep the only copy of. Examples: the photo library, scanned documents,
+# tax and finance records, family videos, a "keep" folder. Suggested default: every folder that holds the
+# only copy of something; also list them in roadmap/home-setup.md ("Things I would hate to lose"). Empty =
+# off. LIMIT: it matches paths NAMED in the command (`rm -rf /path/to/photos/x`,
 # `find /path/to/photos -delete`). It does NOT see `cd /path/to/photos && rm -rf *`, a glob that expands
 # to the folder, or a deletion made from inside a script or interpreter. Keep real backups of these folders.
 H4_NEVER_PATHS='/path/to/photos|/path/to/documents|_keep'

@@ -127,10 +127,21 @@ notes behind it.
   docs say Git for Windows is optional, but without it hook commands run under PowerShell, this
   plugin's bash hooks do not run, and **every gate is silently off**. Setup step 7 proves they run
   (`check-gates.sh --live "git push"` with `AGENT_ROLE=overseer` must print BLOCKED); use WSL if Git
-  Bash gives you trouble. The session registry (H5) shows nothing on Windows, since it reads `/proc`.
+  Bash gives you trouble. The session registry (H5) shows nothing on Windows, since it reads `/proc`
+  (exactly what it reads is the next-but-one bullet).
   If `check-gates.sh` fails there, the first-hour layer still works: skills and personas need no hooks.
 - **Missing pieces turn gates off.** No `jq` means no gates (session start prints a warning); a hook
   script that loses its executable bit is silently off. Check both yourself.
+- **What the session hook (H5) reads and writes.** To record which process is your Claude Code session,
+  `session-start.sh` walks up the parent chain (at most 12 processes). For each ancestor it reads
+  `/proc/<pid>/stat` (the parent pid), `/proc/<pid>/exe` and the first word of `/proc/<pid>/cmdline` (is
+  this the claude binary?), and Claude Code's own per-process file `~/.claude/sessions/<pid>.json`: only
+  its `sessionId` field, used for one equality test against this session's id. The pid in that path is
+  digits only, so it reads one named file per ancestor, never a glob, never a listing of the folder, and
+  nothing else in it; it writes nothing there. Its only writes are one small file per session under
+  `agents/state/sessions/` in your repo and the removal of entries there whose process is gone or whose
+  session id was replaced in the same process (`/clear`, resume). Without `/proc` (Windows) the walk
+  cannot climb, so nothing matches and the pid is recorded as 0.
 - **H4 only blocks when `AGENT_ROLE` is set** (an unattended run). In your own sessions it asks;
   never-paths block everywhere. That is deliberate: you are the human in the loop. Keep permission
   prompts ON for Bash.

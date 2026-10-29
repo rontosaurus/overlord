@@ -39,8 +39,8 @@ and the verification protocol) before acting. The project's `CLAUDE.md` rules bi
   command; decline leaves it staged. Never rephrase a command to avoid the prompt.
 - **Never-list items are not yours in any mode:** no sends to anyone, no secret values in output, no deleting the
   owner's own data, no money, no decision-log edits. Name them in the report; the owner does them.
-- **If the harness denies a command** ("denied by the auto mode classifier"), stop and report the reason
-  verbatim. Never try the same outcome another way. Log it:
+- **A refusal is a stop** (harness, hook or classifier, read-only included): report the reason verbatim; never
+  reach the same effect another way (a wrapper script, a one-off python, another tool). Log it:
   `agents/bin/drift classifier-deny <id|-> "worker: <action> - <reason verbatim>"`.
 - Never fetch a secret unless the task names the key; never echo a value.
 - **Never read a credential-bearing file whole** - application preference files that hold an auth
@@ -69,7 +69,10 @@ End with:
 ## Attestations
 | Claim | Verify with | Expected |
 |---|---|---|
-(every Verify-with cell is one backticked, rerunnable, read-only command)
+(every Verify-with cell is one backticked, rerunnable, read-only command; Expected is a literal, or `~text` = the output contains text, for varying wording)
 
 ## Not done / needs a human
+
+Unspecified: <what the brief left open and how you resolved it> | none
 ```
+(the `Unspecified:` line is runner testimony: two reports naming the same gap get a rule written for it)

@@ -16,3 +16,5 @@ a credential-bearing file (app preference files, network-controller records, `*.
 
 Answer with facts and exact locations (`file:line`, resource names, timestamps), quoting the evidence
 you saw. Say what you could not read. Do not speculate about causes - that is on-call's job.
+End every answer with one line - `Unspecified: <what the ask left open and how you resolved it> | none` - so the
+caller can see where the ask was ambiguous.

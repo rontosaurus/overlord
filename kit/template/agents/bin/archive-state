@@ -10,8 +10,10 @@ by header name (so extra columns are fine). Run it when `rehydrate` prints OVER 
 
   (a) Recently closed — table rows whose `closed` cell, and bullets whose first-line date, are older than --days
       (default 14)                                                       -> archive/closed-<YYYY-MM>.md
-  (b) Ask the owner — rows whose Go/answer cell is non-empty AND not a placeholder ("—", "*(pending…)*") AND carries no
-      still-open word (pending|still … open|open|owed|waiting|awaits|apply pending)   -> archive/asks-<YYYY-MM>.md
+  (b) Ask the owner — rows whose Go/answer cell is the owner's quoted words ("…" or curly quotes), carries a closing
+      verb (done|declined|dropped|applied|yes-applied|cancelled|closed) and no still-open word
+      (pending|open|owed|waiting|awaits|waits|next|still|leftover|confirm)  -> archive/asks-<YYYY-MM>.md
+      A bare "yes" or a placeholder ("—", "*(pending…)*") never closes an ask.
   (e) Open initiatives — rows whose status cell begins MERGED/DONE/LIVE/CLOSED, has no open word, and whose newest
       date in the row is older than --days                               -> archive/initiatives-<YYYY-MM>.md
   (c) Watching — bullets (with their continuation lines) whose first line has a date older than --days; a bullet
@@ -28,8 +30,16 @@ import datetime as dt, os, re, sys
 from pathlib import Path
 
 DATE = re.compile(r"(?<![\d:.-])(?:(20\d\d)-)?(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])(?![\d:-])")
-OPEN_WORDS = re.compile(r"pending|still [^.|]{0,20}\bopen\b|\bopen\b|\bowed?\b|waiting|awaits?|waits? ", re.I)
+# Any of these ANYWHERE in a cell means work is still owed; the list is deliberately wide, so a row stays put when in doubt.
+OPEN_WORDS = re.compile(r"pending|still [^.|]{0,20}\bopen\b|\bopen\b|\bowed?\b|waiting|awaits?|\bwaits?\b|\bnext\b|\bstill\b|leftovers?|confirm", re.I)
 PLACEHOLDER = re.compile(r"^[\s—–\-*_]*$|^\*?\(pending", re.I)
+QUOTED = re.compile(r'"[^"]{2,}"|“[^”]{2,}”')
+CLOSING = re.compile(r"\b(done|declined|dropped|applied|yes-applied|cancelled|closed)\b", re.I)
+
+
+def ask_settled(ans):
+    """An Ask-the-owner answer closes the ask only when it is the owner's quoted words, carries a closing verb and no open word."""
+    return bool(ans) and not PLACEHOLDER.match(ans) and not OPEN_WORDS.search(ans) and bool(QUOTED.search(ans)) and bool(CLOSING.search(ans))
 
 
 def to_date(m, now):
@@ -131,7 +141,7 @@ def plan_state(text, now, days):
             c = cells(l)
             if len(c) != len(hdr) or not c[0].isdigit() or "<!-- keep -->" in l: continue
             ans = c[gi]
-            if PLACEHOLDER.match(ans) or OPEN_WORDS.search(ans): continue
+            if not ask_settled(ans): continue
             d = to_date(DATE.search(c[oi]), now) if oi is not None and DATE.search(c[oi]) else None
             d = d or now
             idxs = [i]

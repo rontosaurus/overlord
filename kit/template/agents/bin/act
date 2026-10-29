@@ -7,6 +7,7 @@ set -euo pipefail
 REPO="${AGENTS_REPO:-$(cd "$(dirname "$0")/../.." && pwd)}"
 F="$REPO/agents/state/activity.tsv"
 [ "${AGENT_EVAL:-0}" = 1 ] && { echo "act: eval run, not recorded"; exit 0; }   # test replays never write real activity
+case "${1:-}" in -h|--help) echo 'usage: act <initiative|-> "<what>" [--undo "<how>"] [--proof "<path or command>"]'; exit 0;; -?*) echo "act: unknown option '$1' (a flag is never an initiative; use - for none)" >&2; exit 2;; esac
 [ $# -ge 2 ] || { echo 'usage: act <initiative|-> "<what>" [--undo "..."] [--proof "..."]' >&2; exit 2; }
 init="$1"; what="$2"; shift 2
 undo="" proof=""

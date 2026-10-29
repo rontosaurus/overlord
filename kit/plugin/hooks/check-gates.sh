@@ -177,5 +177,41 @@ mkdir -p "$tmp/victim-carry"; echo "CARRY-VIA-DIR" > "$tmp/victim-carry/overlord
 echo '{"session_id":"c-6"}' | env -u AGENT_ROLE bash "$here/session-start.sh" 2>/dev/null | grep -q CARRY-VIA-DIR \
   && bad "[carry] symlinked carry dir followed" || ok "[carry] a symlinked carry dir is not followed"
 
+# 11. SessionStart records the claude process, not the hook's wrapper shell (needs /proc; skipped where there is none).
+#     A stand-in "CLI" process runs the hook from a child shell: a ~/.claude/sessions/<pid>.json naming the session id
+#     wins; failing that, an ancestor whose argv0 is "claude"; a process that merely has "claude" in its command line is
+#     NOT the CLI; and a second session id in the same process (/clear, resume) replaces the first entry.
+if [ -r "/proc/$$/stat" ]; then
+  hh="$tmp/home"; rm -rf "$hh" "$tmp/agents/state"; mkdir -p "$hh/.claude/sessions" "$tmp/agents/state/sessions" "$tmp/claude-wrapper"
+  cat > "$tmp/fakecli.sh" <<'FAKE'
+#!/usr/bin/env bash
+# stand-in for the claude CLI: runs the hook from a child shell, once per session id given
+hook="$1"; pf="$2"; shift 2
+echo $$ > "$pf"
+for s in "$@"; do
+  [ -n "${FAKE_SESSIONFILE:-}" ] && printf '{"sessionId":"%s"}' "$s" > "$HOME/.claude/sessions/$$.json"
+  printf '{"session_id":"%s"}' "$s" | sh -c 'bash "$1" >/dev/null 2>&1; true' _ "$hook"
+done
+true
+FAKE
+  cp "$tmp/fakecli.sh" "$tmp/claude-wrapper/fakecli.sh"
+  rpid() { jq -r '.pid // "none"' "$tmp/agents/state/sessions/$1.json" 2>/dev/null || echo none; }
+  HOME="$hh" FAKE_SESSIONFILE=1 bash "$tmp/fakecli.sh" "$here/session-start.sh" "$tmp/p.a" pw-a
+  [ "$(rpid pw-a)" = "$(cat "$tmp/p.a" 2>/dev/null)" ] && ok "[session] the process whose sessions file names this session id is recorded" \
+    || bad "[session] sessions-file match (recorded $(rpid pw-a), expected $(cat "$tmp/p.a" 2>/dev/null))"
+  HOME="$hh" FAKE_SESSIONFILE=1 bash "$tmp/fakecli.sh" "$here/session-start.sh" "$tmp/p.b" pw-b1 pw-b2
+  [ -e "$tmp/agents/state/sessions/pw-b2.json" ] && [ ! -e "$tmp/agents/state/sessions/pw-b1.json" ] && [ "$(rpid pw-b2)" = "$(cat "$tmp/p.b" 2>/dev/null)" ] \
+    && ok "[session] a new session id in the same process replaces the old entry" || bad "[session] superseded entry not replaced"
+  ( export HOME="$hh"; exec -a claude bash "$tmp/fakecli.sh" "$here/session-start.sh" "$tmp/p.c" pw-c )
+  [ "$(rpid pw-c)" = "$(cat "$tmp/p.c" 2>/dev/null)" ] && ok "[session] without a sessions file, the ancestor whose argv0 is claude is recorded" \
+    || bad "[session] argv0 fallback (recorded $(rpid pw-c), expected $(cat "$tmp/p.c" 2>/dev/null))"
+  HOME="$hh" bash "$tmp/claude-wrapper/fakecli.sh" "$here/session-start.sh" "$tmp/p.d" pw-d
+  [ -e "$tmp/agents/state/sessions/pw-d.json" ] && [ "$(rpid pw-d)" != "$(cat "$tmp/p.d" 2>/dev/null)" ] \
+    && ok "[session] a process that only mentions claude in its command line is not recorded as the CLI" || bad "[session] substring match recorded the wrapper"
+  rm -rf "$hh" "$tmp/claude-wrapper" "$tmp/fakecli.sh" "$tmp/agents/state"
+else
+  echo "SKIP [session] pid detection (no /proc here)"
+fi
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

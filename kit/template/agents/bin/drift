@@ -2,6 +2,10 @@
 # drift <kind> <initiative|-> "<message>"  — append one line to agents/state/drift.log
 # kinds: routing-bypass | waived-F | attestation-fail | hook-block:<gate> | hook-ask:<gate> | gate-skipped | classifier-deny | rotation-failed | other
 set -u
+case "${1:-}" in -h|--help) echo "usage: drift <kind> <initiative|-> <message>"; exit 0;; -?*) echo "drift: unknown option '$1' (a flag is never a kind)" >&2; exit 2;; esac
 f="${AGENTS_REPO:?set AGENTS_REPO}/agents/state/drift.log"
 [ $# -ge 3 ] || { echo "usage: drift <kind> <initiative|-> <message>" >&2; exit 1; }
-printf '%s | %s | %s | %s\n' "$(date -Is)" "$1" "$2" "$3" >> "$f" && tail -1 "$f"
+# One call, one line: a newline in any field would start a second line, and a forged second line (say a classifier-deny one)
+# would trip the alarms that count them. Fold line breaks to spaces, as act does.
+fold() { printf '%s' "$1" | tr '\n\r' '  '; }
+printf '%s | %s | %s | %s\n' "$(date -Is)" "$(fold "$1")" "$(fold "$2")" "$(fold "$3")" >> "$f" && tail -1 "$f"

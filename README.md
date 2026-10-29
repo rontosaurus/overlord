@@ -119,6 +119,23 @@ with my taps listed. You do not need any of those primitives to start.
 - **Personas are held to a replay test.** A set of golden defects (a worker that cats a token file,
   a scout that aggregates wrongly, an optimizer missing a stale trigger) is replayed through the
   personas headlessly. A persona change is judged by whether it still catches them.
+- **Debriefs became part of closing a session.** Every attended role session now ends by answering five
+  short questions: what it spent its turns on, what got in its way, where it guessed, which rule was
+  unclear, and what its successor needs. Nobody grades the answers. The overmind reads them at each
+  review, and two debriefs that name the same friction become an edit to the framework. Several of the
+  fixes in this release trace to them, alongside the drift log and the notes.
+- **A refusal is a stop, read-only included.** A worker that was refused a read-only command once
+  got the same result another way, through a wrapper script. That taught the rule as it now reads in the
+  worker prompt: a refusal from the harness, a hook or the classifier is a stop whatever the command.
+  Report the reason verbatim, log it as a `classifier-deny`, and never reach the same effect through a
+  script or another tool.
+- **My deployment runs things that are not in this kit yet.** There are three: a role guard that boxes a
+  read-only coordinator session into an exact allowlist of commands, argument by argument; a strategist
+  process that is the single writer of status, so no other role edits it; and persistent coordinator and
+  strategist seats that stay open for a day instead of starting per task. I held them back on purpose.
+  The first live probes showed the guard too tight (the coordinator could not even reply to the session
+  of the human it was working for), and I ship a design here only after it has run live for a while. Until
+  then the overlord in your session does that work itself.
 
 
 ## What it missed
@@ -148,19 +165,24 @@ catches a persuasive wrong design. And the cheapest tier is only as good as its 
 Aggregates only, taken from the generated scorecard and state files at the time of extraction. It is
 my own homelab, so these describe one real use, not a benchmark.
 
-- **Gate regression suite (my deployment):** 142 cases for the shell guard hook, run in under a
-  second and on every commit that touches the hooks. About 60 expect a block, about 18 an ask, and 2
-  are recorded accepted false positives. Every real block and every false positive ever seen became
-  one. **What ships in the kit:** `kit/plugin/hooks/cases.txt` has 175 cases (93 expect a block, 29 an
-  ask, 53 an allow) plus 25 built-in tests in `check-gates.sh`: 200 in total, and
-  `bash kit/plugin/hooks/check-gates.sh` ends with `200 passed, 0 failed`.
-- **Persona replay:** 14 golden defects, each caught on its latest run; about 37 replays on record,
-  including early runs that failed and drove prompt changes.
-- **Drift log:** over 220 lines across about five weeks, 24 distinct kinds.
-- **Dispatches:** around 70 costed overseer runs after the cost ledger began, and roughly a hundred
+- **Gate regression suite (my deployment):** 245 cases for the shell guard hook, run in under a
+  second and on every commit that touches the hooks. 123 expect a block, 41 an ask, and 6 are
+  recorded accepted false positives. Every real block and every false positive ever seen became
+  one. **What ships in the kit:** `kit/plugin/hooks/cases.txt` has 309 cases (166 expect a block, 58 an
+  ask, 85 an allow; 4 pinned false positives) plus 29 built-in tests in `check-gates.sh`: 338 in total,
+  and `bash kit/plugin/hooks/check-gates.sh` ends with `338 passed, 0 failed`. About 130 of those
+  cases were added in this release, and some 70 of them fail against the previous kit guard: the
+  quoted-grep false positive, line continuations, recursive deletes with the flags after the path,
+  rsync and find variants, host-power verbs with redirects, and four heredoc shapes that hid a command.
+  A security read of the release found one more hole in the fix itself (an apostrophe inside a
+  double-quoted string could hide a reboot from the new pattern blanking) and it is pinned as a case.
+- **Persona replay:** 29 golden defects, each caught on its latest run; over a hundred replays on
+  record, including early runs that failed and drove prompt changes.
+- **Drift log:** about 380 lines across six weeks, 37 distinct kinds.
+- **Dispatches:** about a hundred costed overseer runs after the cost ledger began, and about 140
   saved reports.
-- **Overmind reviews:** nine numbered reviews of the framework itself, each ending in concrete edits
-  to prompts, personas, routing or hooks.
+- **Overmind reviews:** thirteen numbered reviews of the framework itself, each ending in concrete
+  edits to prompts, personas, routing or hooks.
 - **Test suites that ship:** `test_board.py` and `test_usage.py` under `kit/template/agents/bin/`, and
   the `overlord-board` mod's own tests (`claude plugin test kit/mods/overlord-board`). My deployment
   also runs suites for state files, rotation, the strategist and the evaluator; those are not in the kit.

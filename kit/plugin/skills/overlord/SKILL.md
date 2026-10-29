@@ -107,6 +107,11 @@ things marked `read` or `manage`, which checks the table against what is really 
   named in the report); every design-level trigger (Class F) has a `design-review` verdict or a
   written waiver saying who waived it and why; every attestation is verified. Then merge, confirm the
   roadmap/spec status line and log changed, and commit.
+- **Two BLOCKs of the same class from a required review -> stop.** If a security read blocks a change twice for
+  the same kind of reason (a second bypass found in the same parser, say), do not run a third fix round. Write
+  the report PARTIAL with the pattern and one question - "is the bar or the approach wrong?" - and take it to the
+  owner (to the overmind too, when the change is to `agents/**`). A bar the design cannot meet is a design
+  decision, not another fix.
 - **Owner's-hand actions** go into the **Ask** table in `agents/state/overlord.md` with the exact
   command or change staged (and a `reply:` phrase that would do it). Neither you nor any subagent executes
   them without the owner's explicit go for that row in this session; record the go in the row when you do.
@@ -139,5 +144,8 @@ would see.
 2. Append anything the overmind should know to `agents/state/notes-to-overmind.md`: routing that felt
    wrong, a persona that lacked context, a gate that fired uselessly or failed to fire, a rule you had
    to work around. Drift lines go in `agents/state/drift.log` (one line: date, kind, initiative, note).
-3. Commit your changes (`git add agents/state` plus whatever the initiative changed). Whether to push
+3. Answer the five questions in `agents/prompts/debrief.md` into
+   `agents/state/debriefs/<YYYY-MM-DD>-overlord-<first 8 of the session id>.md`. Nobody grades them; the
+   overmind reads them at each review.
+4. Commit your changes (`git add agents/state` plus whatever the initiative changed). Whether to push
    is the owner's decision - do not push unless they say so.

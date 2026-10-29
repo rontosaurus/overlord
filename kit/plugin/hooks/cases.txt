@@ -4,7 +4,8 @@
 #   expected  allow | ask:H4 | block:H1 | block:H2 | block:H4
 #             ask:H4 = guard-bash.sh exits 0 with a permissionDecision "ask" (attended sessions: the tap is the go)
 #   (optional 4th word) tool = feed the text to guard-tools.sh (MCP/WebFetch H1) instead of guard-bash.sh;
-#                       bypass = send permission_mode=bypassPermissions in the hook input (an ask must become a block)
+#                       bypass = send permission_mode=bypassPermissions in the hook input (an ask must become a block);
+#                       fp = a documented, accepted false positive: the case pins today's behaviour (runs as a plain case)
 # Config-safety tests (config never executed, malformed config inert, case-insensitive H1, session id
 # validation) are built into check-gates.sh because they need their own config files.
 # check-gates.sh builds a temp project: estate.env with SECRET_CLI=secretcli, guard.conf with
@@ -278,8 +279,9 @@ cat <<EOF-X
 data
 EOF-X
 sudo reboot
-# ... and a line "EOF" inside an EOF-X heredoc does not end it
-### interactive allow
+# ... and a line "EOF" inside an EOF-X heredoc does not end it. A delimiter with a hyphen is not on the strip allowlist,
+# so the whole text is judged and the reboot line is seen (this case was an allow before the allowlist stripper)
+### interactive ask:H4
 cat <<EOF-X
 sudo reboot
 EOF
@@ -478,3 +480,418 @@ EOF
 cat <<EOF | sudo -E bash
 sudo reboot
 EOF
+
+# ---- line continuations: a backslash-newline is joined before the full-text checks -----------------------
+# the never-list sees the joined text, in every mode
+### interactive block:H4
+rm -rf \
+  /data/photos/2020
+### worker block:H4
+rm -rf \
+  /data/photos/2020
+### interactive ask:H4
+rm -rf \
+  /mnt/data/old
+### interactive ask:H4
+git push \
+  --force origin feature
+### worker block:H4
+git push \
+  --force origin feature
+# bash does not continue a comment, so the join must not hide the line that follows one (checks read raw AND joined)
+# (the leading space keeps the case parser from reading the comment line as one of its own comment lines)
+### overseer block:H4
+ # step 1 \
+sudo reboot
+### interactive ask:H4
+ls # see \
+sudo reboot
+# a backslash at the end of the opener line continues the command: the next line is a command, not heredoc body
+### interactive ask:H4
+cat <<EOF \
+&& sudo reboot
+EOF
+### overseer block:H4
+cat <<EOF \
+&& sudo reboot
+EOF
+# a quoted heredoc body is literal: `x\` does not swallow the delimiter (the stripper reads the raw text)
+### interactive ask:H4
+cat > f <<'EOF'
+x\
+EOF
+sudo reboot
+EOF
+### interactive block:H2
+cat > f <<'EOF'
+x\
+EOF
+secretcli secret get some-id > /tmp/v
+EOF
+
+# ---- rm -r with the flags after the path, xargs rm -r, find -exec rm / -ok rm ---------------------------
+### interactive block:H4
+rm /data/photos/2020 -rf
+### interactive block:H4
+rm --interactive=never -r /data/photos/x
+### worker block:H4
+rm /data/photos/2020 -rf
+### interactive block:H4
+find /data/photos/2020 -mindepth 1 -exec rm -rf {} +
+### interactive block:H4
+find /data/photos -ok rm {} \;
+### interactive block:H4
+ls -d /data/photos/2020/* | xargs rm -rf
+### worker block:H4
+ls -d /data/photos/2020/* | xargs rm -rf
+### interactive ask:H4
+rm /mnt/data/old -rf
+### interactive ask:H4
+ls -d /mnt/data/old/* | xargs rm -rf
+### overseer block:H4
+rm /opt/x -rf
+### overseer allow
+docker run --rm -v /opt/x:/x alpine ls /x
+### overseer allow
+rm -f /tmp/x.json && ls /opt
+
+# ---- never list: rsync --delete* / --remove-source-files, unlink, shred ---------------------------------
+### interactive block:H4
+rsync -a --delete empty/ /data/photos/
+### interactive block:H4
+rsync -a --delete empty/ /data/photos/ 2>/dev/null
+### interactive block:H4
+rsync -a --del empty/ /data/photos/x/ -v
+### interactive block:H4
+rsync -a --remove-source-files /data/photos/ /backup/x/
+### worker block:H4
+rsync -a --delete empty/ /data/photos/
+### interactive block:H4
+shred -u /data/photos/2020/a.jpg
+### interactive block:H4
+unlink /data/photos/2020/a.jpg
+# accepted false positive: a --delete backup that only READS from a data root is blocked too
+### overseer block:H4 fp
+rsync -a --delete /data/photos/ /backup/p/
+### overseer allow
+rsync -a --delete /srv/x/ /backup/p/
+### interactive allow
+rsync -a /data/photos/ /backup/p/
+### interactive allow
+unlink /tmp/lockfile
+
+# ---- host power: prefix words, init levels, isolate, soft-reboot, sysrq, bash -c ------------------------
+### overseer block:H4
+systemctl isolate reboot.target
+### overseer block:H4
+sudo systemctl start poweroff.target
+### overseer block:H4
+systemctl soft-reboot
+### overseer block:H4
+sudo systemctl rescue
+### overseer block:H4
+systemctl -H somehost reboot
+### overseer block:H4
+bash -c reboot
+### overseer block:H4
+timeout -s KILL 5 reboot
+### overseer block:H4
+ionice -c 3 reboot
+### overseer block:H4
+nice -n 5 /sbin/reboot
+### overseer block:H4
+env FORCE=1 reboot
+### overseer block:H4
+/usr/bin/sudo -n -u root poweroff
+### overseer block:H4
+sudo -u root /sbin/shutdown -h now
+### overseer block:H4
+ssh somehost 'sudo -u root /sbin/reboot'
+### overseer block:H4
+echo b > /proc/sysrq-trigger
+### overseer block:H4
+echo o | sudo tee /proc/sysrq-trigger
+### overseer block:H4
+sudo init s
+### interactive ask:H4
+sudo telinit 0
+### interactive ask:H4
+systemctl isolate reboot.target
+### interactive ask:H4
+echo b > /proc/sysrq-trigger
+### overseer allow
+git init
+### overseer allow
+grep -n runlevel docs/shutdown-runbook.md; git init
+### overseer allow
+systemctl status myapp; ls /sbin/ | grep reboot
+### overseer allow
+systemctl start reboot-notify.service
+### overseer allow
+systemctl status rescue.target
+### overseer allow
+cat /proc/sys/kernel/sysrq
+# the wider prefix list applies to the protected-file check too
+### interactive block:H7
+ionice -c 3 rm agents/bin/tick
+### interactive block:H7
+env X=1 rm agents/bin/tick
+
+# ---- a `|` inside a quoted grep/rg pattern is regex alternation, not a pipe ----------------------------
+### interactive allow
+journalctl -u upsmon --since yesterday --no-pager 2>/dev/null | grep -i -E 'battery|online|shutdown' | tail -8
+### overseer allow
+grep -E -e 'FSD' -e "reboot|poweroff" /var/log/syslog | tail
+### overseer allow
+rg -n 'halt|shutdown' docs/ | head
+### overseer allow
+grep -n "init 0" docs/shutdown-runbook.md
+# ... and the power shapes around a grep must still be caught
+### overseer block:H4
+grep -q 'x' /etc/hosts && shutdown -h now
+### overseer block:H4
+grep -l 'x' f; bash -c 'sudo reboot'
+### overseer block:H4
+rg 'h' hosts.txt | xargs reboot
+### interactive ask:H4
+grep -c 'ok' log && sudo poweroff
+
+# ---- unattended git: refs written by hand, branch moves, the fast-forward exception --------------------
+### overseer block:H4
+git update-ref refs/heads/main HEAD~1
+### worker block:H4
+git commit-tree HEAD^{tree} -m x
+### interactive allow
+git update-ref refs/heads/scratch HEAD
+### overseer block:H4
+git branch -f main origin/main
+### overseer block:H4
+git branch -M main
+### overseer block:H4
+git branch --move old new
+### interactive allow
+git branch --list 'init/*'
+### overseer allow
+git branch -a
+# a fast-forward from origin/main is allowed ONLY as the whole command: one line, no ; & |
+### overseer allow
+git merge --ff-only origin/main
+### overseer allow
+git -C /work/tree merge --ff-only origin/main
+### interactive allow
+git merge --ff-only origin/main
+### overseer block:H4
+git fetch origin && git merge --ff-only origin/main
+### overseer block:H4
+git merge --ff-only origin/main && git rebase main
+### overseer block:H4
+git merge --ff-only origin/main
+git checkout main
+### worker block:H4
+git merge --ff-only origin/main
+git rebase main
+### overseer block:H4
+git merge --ff-only origin/main; git switch main
+### overseer block:H4
+git -C /x merge --ff-only origin/main | git merge init/x main
+
+# ---- H2: a fetch inside an UNQUOTED heredoc body expands while the text is written ---------------------
+### interactive block:H2
+cat > run.sh <<EOF
+TOKEN=$(secretcli secret get some-id | jq -r .value)
+EOF
+### worker block:H2
+cat > run.sh <<EOF
+TOKEN=$(secretcli secret get some-id | jq -r .value)
+EOF
+### interactive allow
+cat > f <<EOF
+x
+EOF
+T=$(secretcli secret get some-id | jq -r .value)
+### interactive allow
+cat > notes.md <<'EOF'
+fetch it with $(secretcli secret get some-id | jq -r .value)
+EOF
+# attended H2 reads the text with heredoc data removed; an unattended run reads all of it
+### worker block:H2
+cat > notes.md <<'EOF'
+run: secretcli secret list
+EOF
+# a tab-indented EOF does NOT end a plain << heredoc (the fetch below it is still body) but does end a <<- one
+### interactive block:H2
+cat >f <<EOF
+	EOF
+T=$(secretcli secret get some-id)
+EOF
+### interactive allow
+cat >f <<-EOF
+	EOF
+T=$(secretcli secret get some-id | jq -r .value)
+
+# ---- the strip is an allowlist: one cat/tee opener line + its body + the delimiter, nothing else -----------------
+# a here-string is not a heredoc: the lines after it are commands
+### interactive ask:H4
+cat <<< EOF
+sudo reboot
+EOF
+### overseer block:H4
+cat <<< EOF
+sudo reboot
+EOF
+### interactive block:H2
+cat <<< EOF
+secretcli secret get some-id > /tmp/v
+EOF
+### overseer block:H2
+cat <<< EOF
+secretcli secret get some-id > /tmp/v
+EOF
+# an unquoted delimiter's body is expanded: $( ) and backticks RUN while the text is written
+### interactive ask:H4
+cat > notes.md <<EOF
+$(sudo reboot)
+EOF
+### interactive ask:H4
+cat > notes.md <<EOF
+`sudo reboot`
+EOF
+### worker block:H4
+cat > notes.md <<EOF
+$(sudo reboot)
+EOF
+# ... and an unquoted body line that ends in a backslash is joined by bash onto the delimiter line, so nothing is stripped
+### interactive ask:H4
+cat > f <<EOF
+x\
+EOF
+sudo reboot
+EOF
+# a quoted delimiter makes the body literal, so $( ) and backticks there are plain text
+### interactive allow
+cat > notes.md <<'EOF'
+`sudo reboot` and $(sudo reboot) are written as text
+EOF
+# stripped data that is run some other way: none of these strip any more
+### interactive ask:H4
+cat <<'EOF' | while read -r l; do $l; done
+sudo reboot
+EOF
+### interactive ask:H4
+bash <(cat <<'EOF'
+sudo reboot
+EOF
+)
+### interactive ask:H4
+c=$(cat <<'EOF'
+sudo reboot
+EOF
+)
+$c
+### interactive ask:H4
+cat() { /bin/sh; }
+cat <<'EOF'
+sudo reboot
+EOF
+### worker block:H4
+cat() { /bin/sh; }
+cat <<'EOF'
+sudo reboot
+EOF
+### interactive ask:H4
+cat <<'EOF' >/tmp/x.sh && chmod +x /tmp/x.sh && /tmp/x.sh
+sudo reboot
+EOF
+# write-then-run in ONE command: the second command line disables the strip, so the script body is seen
+### interactive ask:H4
+cat > /tmp/x.sh <<'EOF'
+sudo reboot
+EOF
+bash /tmp/x.sh
+### interactive ask:H4
+cat > /tmp/x.sh <<'EOF'
+sudo reboot
+EOF
+chmod +x /tmp/x.sh; /tmp/x.sh
+### worker block:H4
+cat > /tmp/x.sh <<'EOF'
+sudo reboot
+EOF
+bash /tmp/x.sh
+# prose writes still pass in an attended session (one opener line, any body of plain text)
+### interactive allow
+cat <<-EOF > notes.md
+	sudo reboot is the owner's tap
+	EOF
+### interactive allow
+tee -a notes.md >/dev/null <<EOF
+the host will reboot
+EOF
+### interactive allow
+ # a note for the brief
+cat > notes.md <<'EOF'
+sudo reboot is the owner's tap
+EOF
+### interactive allow
+cat > notes.md <<EOF
+the share lives under $HOME/x; reboot is the owner's call
+EOF
+### interactive allow
+cat > notes.md <<'EOF'
+fetch it with: secretcli secret get some-id > /tmp/v
+EOF
+### worker block:H2
+cat > notes.md <<'EOF'
+fetch it with: secretcli secret get some-id > /tmp/v
+EOF
+# every block reads the full text: heredoc prose that itself holds a redirect into a control file blocks (H7)
+### interactive block:H7 fp
+cat > docs/notes.md <<'EOF'
+reset it with: echo '{}' > agents/state/ceiling.json
+EOF
+### worker block:H7
+cat > docs/notes.md <<'EOF'
+echo x >> agents/bin/tick
+EOF
+# accepted false positive: an opener whose FILE word is quoted or holds a variable is not on the allowlist, so prose
+# written through it is judged on the full text (fail closed); use a plain file name to keep the strip
+### interactive ask:H4 fp
+cat > "$HOME/notes.md" <<'EOF'
+sudo reboot is the owner's tap
+EOF
+
+# ---- the grep-pattern blanking never starts at a quote that is literal inside the OTHER kind of quoting ------------
+# the apostrophe after "see grep" is plain text inside the double quotes, so the reboot after the ; is a real command
+### overseer block:H4
+echo "see grep 'x"; sudo reboot; echo 'y'
+### interactive ask:H4
+echo "see grep 'x"; sudo reboot; echo 'y'
+# ... and the mirror image: a double quote that is plain text inside single quotes
+### overseer block:H4
+echo 'see grep "x'; sudo reboot; echo "y"
+### interactive ask:H4
+echo 'see grep "x'; sudo reboot; echo "y"
+# a pattern that itself holds the other quote character is simply not blanked: a false-positive ask at worst
+### interactive ask:H4 fp
+grep -E "don't|shutdown" docs/runbook.md
+# real quoted patterns are still blanked
+### interactive allow
+grep -E 'battery|shutdown' docs/runbook.md
+### overseer allow
+grep -E "battery|shutdown" docs/runbook.md
+
+# ---- a power word followed directly by a redirect is still the command ----------------------------------------------
+### overseer block:H4
+systemctl reboot>/dev/null
+### overseer block:H4
+sudo reboot>/dev/null
+### interactive ask:H4
+sudo reboot>/dev/null
+### overseer block:H4
+systemctl reboot</dev/null
+### overseer block:H4
+shutdown>/dev/null
+### interactive ask:H4
+systemctl poweroff>/dev/null
+### overseer allow
+echo reboot>/dev/null

@@ -18,6 +18,7 @@ and hooks; this directory holds *your* rules and *your* state.
 | `bin/board` | Renders the state files to a local read-only page and `board.json` in `state/board/` (`--band` prints four lines). Tests: `python3 -B bin/test_board.py`. |
 | `bin/usage` | API-list-price-equivalent ledger of sessions and subagents in `state/usage.tsv`; `usage session` is the close-out summary. The dollars measure work, not a bill. Tests: `python3 -B bin/test_usage.py`. |
 | `bin/rotate`, `bin/carry`, `prompts/rotation.md` | Session rotation: the carry file the next session's start prints. |
+| `prompts/debrief.md`, `state/debriefs/` | Five questions (Spent, Friction, Guesses, Rules, Successor) every overlord and overmind session answers at close-out, one file per session. Nobody grades them; the overmind reads them at each review, and two debriefs naming the same friction get an edit. |
 | `senses.d/` | Pluggable "what broke" checks the tick runs; each prints TSV finding rows. Its README suggests one for each thing you list in `roadmap/home-setup.md`. |
 | `systemd/` | Timer, service and cron examples for the tick. |
 | `state/ceiling.json`, `state/strategist.json` | The owner's knobs: daily budget, WIP limit, `tick_mode` (the claude binary and notify command are set in the systemd unit as `HATCHERY_CLAUDE_BIN` / `HATCHERY_NOTIFY_CMD`, not here); strategist timezone and weekly hour. |
@@ -49,5 +50,5 @@ action only after you say go for that specific row.
 
 Changes to `agents/**` are a class F matter (`ROUTING.md` §2): have the design reviewed — on day one
 that can be you reading — then edit. Run `/hatchery:overmind` for a review session: it reads
-`state/notes-to-overmind.md` after the last review marker, looks at `state/drift.log`, and proposes
-edits to `ROUTING.md` or the personas. A real miss becomes a test case before the persona is edited.
+`state/notes-to-overmind.md` after the last review marker, looks at `state/drift.log` and
+`state/debriefs/`, and proposes edits to `ROUTING.md` or the personas. A real miss becomes a test case before the persona is edited.

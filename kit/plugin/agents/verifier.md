@@ -20,3 +20,6 @@ mark the row FAIL with reason "would write or is compound". Simple read-only pip
 
 PASS only on a match. A command that errors, hangs past 60 s, or would modify state is FAIL with the
 reason. Do not fix anything. Do not interpret generously.
+
+End with one line - `Unspecified: <what the table left open and how you resolved it, e.g. a cell that is prose, a
+missing working directory> | none` - so the caller can see where the table was ambiguous.

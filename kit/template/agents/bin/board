@@ -2,7 +2,8 @@
 """board — render the overlord's state as a local, read-only work board (page + JSON + a four-line band).
 
 A PROJECTION of agents/state/overlord.md (plus, when present, next.md, priorities.md, threads.md, arc.md,
-activity.tsv, costs.tsv, runs/), never a tracker: it reads, it never writes state. Local only: no server,
+activity.tsv, costs.tsv, runs/, notes-to-overmind.md, debriefs/, drift.log), never a tracker: it reads, it never
+writes state. Local only: no server,
 no network, no login. Open the page with a browser (file://), or read board.json.
 
   board                      render into <repo>/agents/state/board/ (index.html, board.json, files/)
@@ -28,6 +29,13 @@ Formats (all Markdown tables, first row = header, matched by column NAME so extr
   costs.tsv      ts, id, model, turns, cost_usd, duration_s, subtype, origin          (origin "unattended" binds)
   ceiling.json   {"daily_usd": N, "daily_turns": N}
   runs/<id>.pid + runs/<id>.json (live overseer), runs/tick.json ({"finished","mode","result":{"subtype"}}; else the newest tick row of costs.tsv)
+  notes-to-overmind.md  the last line that starts `<!-- overmind review YYYY-MM-DD` is the last review (the Review card)
+  debriefs/      one file per session, named YYYY-MM-DD-<role>-<id>.md; those dated on or after the last review are counted
+  drift.log      `ts | kind | initiative | message`; only its last megabyte is read; counted by kind since the last review,
+                 and the recent denies (below)
+board.json gets two optional keys, null when their source file is absent:
+  review  {"last_review", "days_since", "debriefs_since", "drift_since": {kind: n}}   (counts and a date, no message text)
+  alarms  {"recent_denies": n}  hook-block lines from attended sessions plus classifier-deny lines in the last 15 minutes
 """
 import argparse, base64, datetime as dt, hashlib, html, json, os, re, stat, sys, unicodedata
 
@@ -46,6 +54,11 @@ STRAT_SLOTS = ("tap", "reply", "at-pc", "evening", "decide")
 OWNER_NEXT = re.compile(r"\b(?:owner|you|your)\s+next\b|\bowner:", re.I)
 ACT_COLS = ["ts", "who", "initiative", "what", "undo", "proof"]
 OPEN_FLAGS = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+REVIEW_MARK = re.compile(r"^<!-- overmind review (\d{4}-\d\d-\d\d)", re.M)
+DRIFT_KINDS = ("routing-bypass", "waived-F", "attestation-fail", "hook-block", "hook-ask", "gate-skipped", "classifier-deny",
+               "rotation-failed", "other")
+DENY_WINDOW_S = 15 * 60
+DRIFT_TAIL = 1 << 20  # drift.log is append-only and never rotated here: only its last megabyte is read (about 5000 lines)
 
 # Secret shapes: keyword=value, private-key header, common provider key prefixes, long mixed tokens, bearer headers.
 SECRET_RE = re.compile(
@@ -111,6 +124,26 @@ def rtext(path, cap=BIG):
     if t is None:
         raise OSError("not a readable regular file: %s" % path)
     return t
+
+
+def read_tail(path, cap):
+    """(text, clipped) for the LAST `cap` bytes of a regular, non-symlink file, or None. When the file is longer than `cap`
+    the read starts mid-file, so the partial first line is dropped and `clipped` is True."""
+    try:
+        fd = os.open(path, os.O_RDONLY | OPEN_FLAGS)
+        with os.fdopen(fd, "rb") as fh:
+            st = os.fstat(fh.fileno())
+            if not stat.S_ISREG(st.st_mode):
+                return None
+            clipped = st.st_size > cap
+            if clipped:
+                fh.seek(st.st_size - cap)
+            data = fh.read(cap)
+            if clipped:
+                data = data.split(b"\n", 1)[1] if b"\n" in data else b""
+            return data.decode("utf-8", errors="replace"), clipped
+    except OSError:
+        return None
 
 
 def jload(path):
@@ -376,6 +409,92 @@ def scrub(obj):
     return obj
 
 
+# ---------- review and the deny alarm ----------
+def drift_rows(text):
+    """drift.log text -> (time, kind, message) per well-formed line. Kind is the part before any ':' (hook-block:H4 -> hook-block);
+    the time is the wall clock in the line's first 19 characters, read as local time like activity.tsv."""
+    out = []
+    for l in text.split("\n"):
+        f = l.split(" | ", 3)
+        if len(f) < 3:
+            continue
+        try:
+            t = dt.datetime.fromisoformat(f[0][:19])
+        except ValueError:
+            continue
+        out.append((t, f[1].split(":")[0].strip(), f[3] if len(f) == 4 else ""))
+    return out
+
+
+def count_debriefs(d, since):
+    """Debrief files (*.md) dated on or after `since`: by the YYYY-MM-DD the file name starts with, else by modified time.
+    None when there is no debriefs folder; a symlinked folder is not followed."""
+    try:
+        if os.path.islink(d) or not os.path.isdir(d):
+            return None
+        n = 0
+        with os.scandir(d) as it:
+            for e in it:
+                if e.name.startswith(".") or not e.name.endswith(".md") or not e.is_file(follow_symlinks=False):
+                    continue
+                m = re.match(r"\d{4}-\d\d-\d\d", e.name)
+                try:
+                    day = dt.datetime.strptime(m.group(0), "%Y-%m-%d") if m else None
+                except ValueError:
+                    day = None
+                if day is None:
+                    day = dt.datetime.fromtimestamp(e.stat(follow_symlinks=False).st_mtime)
+                n += day >= since
+        return n
+    except OSError:
+        return None
+
+
+def read_review(st, now):
+    """-> (review, alarms) for the Review card and the deny alarm. Counts and one date only: no drift message text, no paths.
+    review  from notes-to-overmind.md: the LAST line that starts `<!-- overmind review YYYY-MM-DD` (a line that merely mentions
+            the marker does not count), then the debriefs and the drift.log lines dated on or after it, drift counted by kind
+            (a kind outside DRIFT_KINDS counts as "other"). None when notes-to-overmind.md is absent; with no marker the four
+            fields are None (never reviewed); debriefs_since / drift_since are None when their folder / log is absent, and
+            drift_since is also None when the log is longer than the last DRIFT_TAIL bytes that are read and those bytes
+            start after the marker (the count would be partial).
+    alarms  {"recent_denies": n}: hook-block lines whose message starts `interactive` (the role the hooks log for a session a
+            person is attending) plus classifier-deny lines (only an attended session has a classifier), in the last 15
+            minutes, from the tail of drift.log. None when drift.log is absent."""
+    nn = now.replace(tzinfo=None)
+    notes = read_regular(os.path.join(st, "notes-to-overmind.md"), BIG)
+    tail = read_tail(os.path.join(st, "drift.log"), DRIFT_TAIL)
+    rows = drift_rows(tail[0]) if tail is not None else None
+    clipped = bool(tail and tail[1])
+    review = alarms = None
+    if rows is not None:
+        n = sum(1 for t, kind, msg in rows
+                if (kind == "classifier-deny" or (kind == "hook-block" and msg.startswith("interactive"))) and 0 <= (nn - t).total_seconds() <= DENY_WINDOW_S)
+        alarms = {"recent_denies": n}
+    if notes is not None:
+        review = {"last_review": None, "days_since": None, "debriefs_since": None, "drift_since": None}
+        since = None
+        for mark in reversed(REVIEW_MARK.findall(notes)):
+            try:
+                since = dt.datetime.strptime(mark, "%Y-%m-%d")
+                break
+            except ValueError:
+                continue
+        if since:
+            review["last_review"] = since.strftime("%Y-%m-%d")
+            review["days_since"] = age_days(since, now)
+            review["debriefs_since"] = count_debriefs(os.path.join(st, "debriefs"), since)
+            # a log longer than the window only counts exactly if the window reaches back to the marker; otherwise unknown
+            if rows is not None and not (clipped and (not rows or min(r[0] for r in rows) > since)):
+                by = {}
+                for t, kind, _ in rows:
+                    if t >= since:
+                        k = kind if kind in DRIFT_KINDS else "other"
+                        by[k] = by.get(k, 0) + 1
+                review["drift_since"] = dict(sorted(by.items()))
+    return review, alarms
+
+
 # ---------- model ----------
 def build(repo, now):
     errors = []
@@ -505,6 +624,7 @@ def build(repo, now):
                 c[k] = WITHHELD
     strat = read_strategist(st, now, errors, publish, card)
     strat = scrub(strat)
+    review, deny = read_review(st, now)
     waiting_n = sum(1 for t in tri_cards if t["lane"] == "waiting")
     tri = {"cards": tri_cards, "idle_days": IDLE_DAYS,
            "counts": {"waiting": waiting_n, "inflight": sum(1 for t in tri_cards if t["lane"] == "inflight"),
@@ -512,7 +632,8 @@ def build(repo, now):
     return {"rendered": now.strftime("%Y-%m-%dT%H:%M:%S"), "rendered_epoch": int(now.timestamp()),
             "last_wake": shorten(clean_line(parsed["last_wake"]), 140), "asks_open": sum(1 for c in cards if c["col"] == "waiting" and not c.get("answered")),
             "tick": read_tick(st), "ceiling": ceiling(st, now), "limits": limits(st),
-            "errors": errors, "cards": scrub(cards), "strategist": strat, "triage": scrub(tri)}, files
+            "errors": errors, "cards": scrub(cards), "strategist": strat, "triage": scrub(tri),
+            "review": scrub(review), "alarms": scrub(deny)}, files
 
 
 def band(repo, now):
@@ -537,6 +658,7 @@ CSS = """:root{--bg:#10131a;--surface:#181c26;--border:#2a3144;--text:#e6e9ef;--
 h1{font-size:17px;margin:2px 0 8px;color:var(--accent)}code{font:12.5px ui-monospace,Menlo,monospace;background:#0e1118;padding:0 3px;border-radius:3px}
 .strip{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.pill{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:5px 9px;font-size:12.5px;color:var(--muted)}
 .pill b{color:var(--text)}.pill.bad{border-color:var(--red);color:var(--red)}.pill.bad b{color:var(--red)}
+.alarm{background:#33280f;border:1px solid var(--accent);color:#f6d58a;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13.5px}
 .banner{background:#3a1a1a;border:1px solid var(--red);color:#fecaca;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:13.5px}
 .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px;align-items:start}
 .col h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:6px 2px}.col h2 .n{color:var(--accent)}.col h2 small{text-transform:none;letter-spacing:0;font-weight:400}
@@ -642,6 +764,27 @@ def render_strategist(m):
     return nl, panes
 
 
+def counted(n, word):
+    return "%d %s%s" % (n, word, "" if n == 1 else "s") if isinstance(n, int) else "? %ss" % word
+
+
+def render_review(m):
+    """The Review column: last review date, days since, debriefs since, drift lines since by kind. Empty when the model has no review."""
+    rv = m.get("review")
+    if not rv:
+        return ""
+    if rv.get("last_review") is None:
+        body = '<div class="empty">no review marker yet - the first review reads everything</div>'
+    else:
+        ds = rv.get("drift_since")
+        drift = "not available" if ds is None else " · ".join("%s %s" % (html.escape(str(k)), html.escape(str(v))) for k, v in ds.items()) or "none logged"
+        deb = rv.get("debriefs_since")
+        body = '<div class="card"><div class="t">last review %s</div><div class="s">%s ago · %s</div><div class="meta">drift since: %s</div></div>' % (
+            html.escape(str(rv["last_review"])), counted(rv.get("days_since"), "day"),
+            "no debriefs folder" if deb is None else counted(deb, "debrief") + " since", drift)
+    return '<section class="col"><h2>Review<small>overmind review (notes-to-overmind.md)</small></h2>%s</section>' % body
+
+
 def render_html(m):
     ts = m["rendered"].replace("T", " ")
     strip = ['<span class="pill"><span id="rendered" data-epoch="%d">rendered <b>%s</b></span></span>' % (m["rendered_epoch"], ts),
@@ -656,6 +799,9 @@ def render_html(m):
     tc = m["triage"]["counts"]
     strip.append('<span class="pill">waiting on you <b>%d</b> · in flight <b>%d</b> · idle >=%dd <b>%d</b></span>' % (tc["waiting"], tc["inflight"], IDLE_DAYS, tc["idle"]))
     p = ['<h1>work board</h1><div class="strip">%s</div>' % "".join(strip)]
+    denies = (m.get("alarms") or {}).get("recent_denies")
+    if denies:
+        p.append('<div class="alarm">%d guard deny(s) on attended sessions in the last 15 min — see state/drift.log</div>' % denies)
     for e in m["errors"]:
         p.append('<div class="banner">parse error - <b>%s</b>%s: %s</div>' % (html.escape(e["section"]), (", line %d" % e["line"]) if e["line"] else "", html.escape(e["msg"])))
     nl, panes = render_strategist(m)
@@ -663,6 +809,7 @@ def render_html(m):
     p.append('<div class="cols">')
     for name, hint, body, n in panes:
         p.append('<section class="col"><h2>%s <span class="n">%d</span><small>%s</small></h2>%s</section>' % (name, n, html.escape(hint), body))
+    p.append(render_review(m))
     for key, name, hint in COLS:
         if key == "running":
             cs = [c for c in m["cards"] if c["col"] in ("running", "open")]
