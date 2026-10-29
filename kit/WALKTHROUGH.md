@@ -32,8 +32,8 @@ not in the current folder.)
 
 Scroll to the **Attestations** table at the bottom. Choose one row and run its "Verify with" command
 yourself. Does it show what the row says it should? That habit is the whole framework in miniature.
-Then answer anything the overlord put under its asks: that list is where irreversible things wait for
-you.
+Then answer anything the overlord put under *Ask the owner* in `agents/state/overlord.md`: that table
+is where irreversible things wait for you.
 
 # Later
 
@@ -47,6 +47,11 @@ you.
   from that folder, so `/reload-plugins` (or a restart) picks up the new hooks; if `/plugin` offers
   an update for hatchery, take it. Then run setup step 7's gate test again. Your repo is a separate
   folder and is never touched by an unpack.
+- **Re-tune the band:** if you load the `overlord-board` mod, edit `agents/board-mod.json` in your repo; every key is
+  optional. Setup wrote it from your answers (if it is not there, copy `<kit>/template/agents/board-mod.json.example`). The keys
+  (the title, what goes first, how many priority rows, alarms as one line or in full, the foot fields) are listed in
+  `<kit>/mods/overlord-board/README.md`. A key the mod cannot use is ignored on its own and the rest still apply, and the mod
+  reads the file again every minute, so you can change it while a session is open.
 - **The overmind review** comes after the first month, not before. Run `/hatchery:overmind` and it
   reads what the framework did. Its procedure handles empty state: "nothing to review yet" is a fine
   result.

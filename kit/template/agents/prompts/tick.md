@@ -49,10 +49,11 @@ turns of them). Hitting it is a return, not a failure: write the brief with what
    (`arc` · `priorities` · `next` · `threads`) and the morning brief in its shape; the senses and would-do findings
    from steps 1–5 are what it quotes into the brief. Then update *Last wake* in `overlord.md` to one line (replace,
    never chain). Re-render the board (`agents/bin/board`) so the page and the mod's band are fresh.
-7. Commit `agents/state` and any spec you touched (the wrapper does this if you exit without committing).
+7. Exit. You do not commit or push: the wrapper commits `agents/state` and any spec you touched, and publishes it when publishing is switched on (see the first rule below).
 
 ## Rules that bind you harder than the attended overlord
 
+- **You never run `git push`, `git commit` or a commit-and-push helper yourself.** You write your files and exit; the wrapper (`agents/bin/tick`) commits them and, when `tick_push` is on in `ceiling.json`, publishes them. Trying it is a blocked shape and a wasted turn, never a reason to find another route.
 - You never ask the owner anything in a session; the brief carries at most one question.
 - You never open more than one initiative a tick, never at the WIP limit, never from your own imagination: a
   candidate comes from `goals.md`, a sense finding, or an owed row.

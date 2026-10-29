@@ -4,9 +4,10 @@ This is the one file you read before installing. Three steps, in order; stop aft
 Nothing is installed until step 3.
 
 Hatchery takes you from asking an AI one-off questions toward a single persistent agent that knows
-your setup and works as advisor, engineer and reviewer, with a coordinator that delegates, checks the
-work it gets back, and writes down what went wrong. Why it is built this way is in
-[`README.md`](README.md); you do not need it to install.
+your setup and works as advisor, engineer and reviewer, with a coordinating agent (the overlord) that
+delegates, checks the work it gets back, and writes down what went wrong. Why it is built this way is
+in [`README.md`](README.md); you do not need it to install. If you want the design before you install,
+[`kit/ARCHITECTURE.md`](kit/ARCHITECTURE.md) describes it in about fifteen minutes.
 
 ## 1. What you are agreeing to (about 5 minutes)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""board — render the overlord's state as a local, read-only work board (page + JSON + a four-line band).
+"""board — render the overlord's state as a local, read-only board (page + JSON + a four-line band).
 
 A PROJECTION of agents/state/overlord.md (plus, when present, next.md, priorities.md, threads.md, arc.md,
 activity.tsv, costs.tsv, runs/, notes-to-overmind.md, debriefs/, drift.log), never a tracker: it reads, it never
@@ -560,7 +560,7 @@ def build(repo, now):
         c["touched_days"] = age_days(newest, now)
         c["stale"] = bool(c["touched_days"] is not None and c["touched_days"] >= IDLE_DAYS)
         cards.append(c)
-        tri_cards.append({"id": id_, "kind": "init", "lane": "waiting" if OWNER_NEXT.search(plain(status)) else "inflight",
+        tri_cards.append({"id": id_, "kind": "init", "lane": "waiting" if OWNER_NEXT.search(plain(status)) else "in_flight",
                           "text": shorten(status, 220), "idle": c["touched_days"], "live": bool(live)})
     for r in parsed["asks"]:
         num = plain(col(r, "#")).strip()
@@ -627,7 +627,7 @@ def build(repo, now):
     review, deny = read_review(st, now)
     waiting_n = sum(1 for t in tri_cards if t["lane"] == "waiting")
     tri = {"cards": tri_cards, "idle_days": IDLE_DAYS,
-           "counts": {"waiting": waiting_n, "inflight": sum(1 for t in tri_cards if t["lane"] == "inflight"),
+           "counts": {"waiting": waiting_n, "in_flight": sum(1 for t in tri_cards if t["lane"] == "in_flight"),
                       "idle": sum(1 for t in tri_cards if t["idle"] is not None and t["idle"] >= IDLE_DAYS)}}
     return {"rendered": now.strftime("%Y-%m-%dT%H:%M:%S"), "rendered_epoch": int(now.timestamp()),
             "last_wake": shorten(clean_line(parsed["last_wake"]), 140), "asks_open": sum(1 for c in cards if c["col"] == "waiting" and not c.get("answered")),
@@ -642,7 +642,7 @@ def band(repo, now):
         model, _ = build(repo, now)
         n = (model["strategist"].get("next") or {}).get("now") or "—"
         c = model["triage"]["counts"]
-        asks = "%d waiting on you · %d in flight · %d idle >=%dd" % (c["waiting"], c["inflight"], c["idle"], IDLE_DAYS)
+        asks = "%d waiting on you · %d in flight · %d idle >=%dd" % (c["waiting"], c["in_flight"], c["idle"], IDLE_DAYS)
         ran = str(sum(1 for c_ in model["cards"] if c_["col"] == "autonomous" and c_.get("kind") == "act"))
         t = model["tick"]
         tick = (t["finished"][5:16].replace("T", " ") or "?") if t else "none"
@@ -797,8 +797,8 @@ def render_html(m):
         strip.append('<span class="pill">today attended <b>$%.2f</b></span>' % cg["attended_usd"])
         strip.append('<span class="pill%s">unattended <b>$%.2f of $%.2f</b></span>' % (" bad" if cg["spent"] else "", cg["usd_used"], cg["usd_ceiling"]))
     tc = m["triage"]["counts"]
-    strip.append('<span class="pill">waiting on you <b>%d</b> · in flight <b>%d</b> · idle >=%dd <b>%d</b></span>' % (tc["waiting"], tc["inflight"], IDLE_DAYS, tc["idle"]))
-    p = ['<h1>work board</h1><div class="strip">%s</div>' % "".join(strip)]
+    strip.append('<span class="pill">waiting on you <b>%d</b> · in flight <b>%d</b> · idle >=%dd <b>%d</b></span>' % (tc["waiting"], tc["in_flight"], IDLE_DAYS, tc["idle"]))
+    p = ['<h1>overlord board</h1><div class="strip">%s</div>' % "".join(strip)]
     denies = (m.get("alarms") or {}).get("recent_denies")
     if denies:
         p.append('<div class="alarm">%d guard deny(s) on attended sessions in the last 15 min — see state/drift.log</div>' % denies)
@@ -830,7 +830,7 @@ def render_html(m):
     csp = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; script-src 'sha256-%s'" % base64.b64encode(hashlib.sha256(JS.encode()).digest()).decode()
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             '<meta http-equiv="Content-Security-Policy" content="%s"><meta http-equiv="refresh" content="60">'
-            '<title>work board</title><style>%s</style></head><body>%s<script>%s</script></body></html>') % (csp, CSS, "".join(p), JS)
+            '<title>overlord board</title><style>%s</style></head><body>%s<script>%s</script></body></html>') % (csp, CSS, "".join(p), JS)
 
 
 # ---------- output ----------

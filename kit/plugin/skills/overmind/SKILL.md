@@ -47,8 +47,10 @@ against an imagined ideal. A review needs evidence.
    **delegate the doing**: a `worker` for edits and fixes, a `verifier` to rerun attestations, a `scout` for
    inventory, `security` for merge-gate reads, each at its own model row. You keep the judgment: the bar, the
    design, whether a report holds. Follow-up that is not framework work (initiatives, asks, incidents) goes to
-   a fresh `/hatchery:overlord` session - say so to the owner rather than doing it here. A long top-model
-   session is the largest single cost, so delegate the execution and close when the framework work is done.
+   a fresh `/hatchery:overlord` session - say so to the owner rather than doing it here. Questions about the framework
+   that change nothing - describing it, a paragraph for a document, which rule applies - may be answered in this
+   session; only work that is not framework work goes to the overlord. A long top-model session is the largest single
+   cost, so delegate the execution and close when the framework work is done.
 7. **Close out.** Before you stop, answer the five questions in `agents/prompts/debrief.md` into
    `agents/state/debriefs/<YYYY-MM-DD>-overmind-<first 8 of the session id>.md` and commit it with the review.
 

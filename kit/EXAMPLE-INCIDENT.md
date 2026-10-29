@@ -76,7 +76,8 @@ that says "blocked, here is why, here is what I did verify" is a good report.
 ## Notes to the overmind
 
 One was a **coverage miss**: the alarm that should have caught the outage had been built outside the
-framework, so it was never reviewed and never tested by deliberately breaking it. The fix was a
+framework, so it was never reviewed and never tested by deliberately breaking it; its answer is the
+share check in the next section. The other was the routing slip above; its fix was a
 session-start line that reminds the overlord to route incidents to on-call first.
 
 ## What the framework could not do: it had no senses

@@ -2,7 +2,8 @@
 
 **For Claude.** The owner opened a Claude Code session in the unpacked `hatchery` folder (it holds
 `START-HERE.md`, `kit/`, and a `LETTER.md` in some editions) and asked to set it up. **Every path below is inside `kit/`**
-(`plugin/` is `kit/plugin/`), and "the kit" means that `kit/` folder. Walk them through the steps below, one
+(`plugin/` is `kit/plugin/`), and "the kit" means that `kit/` folder; commands run from the `hatchery` folder, so
+they spell `kit/` out. Walk them through the steps below, one
 at a time, in plain words. They have never done this before; you are a patient guide, not
 an installer.
 
@@ -26,7 +27,7 @@ Ground rules for the whole session:
    one) and done the privacy check in its step 2. If not: point them to it and stop here. The kit
    waits for that.
 2. Say in one line that this setup is for their home: personal account and machine only.
-3. Tell them the plan in five lines: install two tools → make their own repo folder → a short
+3. Tell them the plan in six lines: install two tools → make their own repo folder → a short
    interview → add three lines to Claude Code's settings (shown first) → they read the safety hooks
    and decide whether to turn them on → a test that shows a gate refusing a command.
 
@@ -121,7 +122,7 @@ Explain: every change the agents make from now on is a commit they can look at a
 Run the same command without `--apply` first. It never overwrites: it reads their
 `~/.claude/settings.json` (if any), keeps every line they have in place, and prints only the entries
 it would add — never their other values (a settings file can hold tokens). Do not `cat` their
-settings file yourself, for the same reason. Explain the three lines:
+settings file yourself, for the same reason. Explain the three lines and the deny rules:
 
 - `extraKnownMarketplaces.hatchery` — tells Claude Code where this kit's plugin lives (the `kit/` folder).
   It only makes the plugin *available*.
@@ -129,6 +130,10 @@ settings file yourself, for the same reason. Explain the three lines:
   If they already have it listed, the script keeps their value.
 - `env.AGENTS_REPO` — the path of their repo, so the hooks know where their rules live. If they
   already have an `AGENTS_REPO`, the script keeps theirs and says so.
+- `permissions.deny` — rules that stop Claude Code's Edit and Write tools from changing the files that
+  govern the agent (their user settings, the plugin's hooks, and in their repo `ceiling.json`,
+  `guard.conf`, `estate.env`, `agents/bin/`, `agents/senses.d/`, `agents/prompts/` and `.claude/`;
+  `dropin/README.md` has the full list). Rules they already have are kept.
 
 On their yes, run it again with `--apply`. It keeps a dated backup of the old file next to it; tell
 them to delete that backup once they are happy, since it is a full copy of their settings.
@@ -189,16 +194,57 @@ step 4 below also proves the settings line `AGENTS_REPO` reaches the hooks. Run:
    them open a session in **their repo folder** and try the same `echo` there.
    - Refused there: the gates work in their repo, which is where they will work; only the
      machine-wide reach (the settings `AGENTS_REPO` line) does not reach the hooks on this machine.
-     Say so plainly, carry on, and and consider filing an issue on the repo.
+     Say so plainly, carry on, and consider filing an issue on the repo.
    - Runs there too: the gates are off on this machine — stop and say so. The most likely causes
      are no Git Bash, no jq, or the plugin not enabled.
 
 ## 8. Board (optional)
 
+**Check:** `agents/state/board/index.html` exists in their repo (the board has been rendered), and, if they have already
+answered the band questions below, so does `agents/board-mod.json`. If both are there, say so in one line and move on.
+
 If `python3 --version` (Windows: `python` or `py`) works: `cd "<repo>" && python3 agents/bin/board`, then
 open `agents/state/board/index.html` in their browser. It is a read-only local page drawn from the state
 files; nothing is served. The `overlord-board` mod in `mods/` draws the same view above the prompt — it is
 off by default; show them `mods/README.md` and let them decide. No Python is fine; skip this step.
+
+**The band's layout (five short questions).** The mod is a base template: with no setup at all it draws a sensible
+default band, and one optional file in their repo, `agents/board-mod.json`, shapes it. Ask once: "A few questions shape
+what the band shows above the prompt. Each has a default, so pressing Enter keeps it. It only matters if you load the mod,
+and you can change the answers any time. Go through them?" On no or skip, write nothing: the mod uses its defaults. If
+`agents/board-mod.json` already exists, never overwrite it: show it and move on (it is theirs to edit). Otherwise ask one at
+a time, saying the default each time, and keep to the ranges (ask again on a value outside them):
+
+1. **What goes first above the prompt: your priorities, or who is working?** (the "roles" line: the title, how full the
+   session's context is, its age and today's spend). Default: priorities. Priorities first is
+   `"order": ["priorities", "roles", "alarms", "review"]`; roles first is `["roles", "priorities", "alarms", "review"]`.
+2. **How many priority rows?** Default 3; 0 to 10. This is `"priorities_rows"`.
+3. **Alarms as one line, or in full?** One line looks like `▲ 3 alarms: board stale · WIP · arc` (hover it for the
+   rows); in full is one row per alarm. Default: automatic, which is one line in a short terminal and every row in a tall
+   one. `"alarms"` is `"auto"`, `"count"` (one line) or `"full"`.
+4. **Which fields on the last row, and in what order?** The choices are `asks` (unanswered asks), `open` (initiatives in
+   progress), `today` (what ran unattended, and the day's spend), `tick` (the last tick) and `ceiling` (unattended spend
+   against the daily budget). Default: asks, open, today, tick. This is `"foot"`, a list of those names in their order.
+5. **A short title for the band?** Default `OVERLORD`; 1 to 40 characters, plain words (no markup). This is `"title"`.
+
+Then write `agents/board-mod.json` in their repo from the answers: one key per question, even where the answer is the
+default, so the file shows what can be changed. For the defaults it is exactly:
+
+```json
+{
+  "title": "OVERLORD",
+  "order": ["priorities", "roles", "alarms", "review"],
+  "priorities_rows": 3,
+  "alarms": "auto",
+  "foot": ["asks", "open", "today", "tick"]
+}
+```
+
+Check it parses (`jq empty "<repo>/agents/board-mod.json"` prints nothing when it is valid JSON), then tell them what it is:
+the file is theirs to edit later, nothing has to be restarted (the mod reads it again every minute), and every key in it is
+optional. The other keys (`full_rows`, `stale_minutes`, `show_subagents`, `board_file`) are left out on purpose;
+`mods/overlord-board/README.md` lists every key with its default and meaning, and `agents/board-mod.json.example` has them
+all. A key the mod cannot use is ignored on its own and the rest still apply, so a typo cannot blank the band.
 
 ## 9. Hand-off
 
@@ -207,6 +253,9 @@ Commit what changed in the repo (`git -C "<repo>" add -A` then `git -C "<repo>" 
 - From now on they open **their repo folder**, not the `hatchery` folder, and type `/hatchery:overlord`.
   The first time, it asks about their home setup (router, NAS, UPS, smart-home hub and so on) and what
   the agents may read, manage, or never touch.
+- If they answered the band questions: `agents/board-mod.json` is now in their repo and was committed with the rest. It is
+  theirs to edit, every key is optional, and the keys are listed in `mods/overlord-board/README.md` (`agents/board-mod.json.example`
+  shows them all with their defaults). It only matters once they load the mod, which stays off until they turn it on.
 - What they did themselves today, and that it was theirs on purpose: the installs' admin prompt,
   reading the hooks, turning the plugin on, every restart.
 - What to read next, only now: `WALKTHROUGH.md` (their first hour, what to do later, and § Turning it off to undo all of this).

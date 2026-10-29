@@ -281,7 +281,7 @@ tunnel writes, certificates), the identity provider's core, storage layout and t
 irreversible deletes, and anything that sends something to a person. These are on the owner's-hand
 list, and the framework does not do them on its own. It shrinks each to one tap: the worker
 prepares the exact command, stages it, and stops; in an attended session I approve that
-command on a phone prompt, or answers an *ask* row with a stated reply phrase. Everything not on
+command on a phone prompt, or answer an *ask* row with a stated reply phrase. Everything not on
 the two lists (never, owner's hand) is fair game, under the three habits: look at live state first,
 record the exact undo, log the action. "Largely without oversight" means exactly that: my
 oversight is the idea at the start, a few taps along the way, and the alarms afterwards.

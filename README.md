@@ -38,7 +38,7 @@ picks who should do a job, checks what comes back, and does not do the work. Spe
 a verdict or a diagnosis, nothing else. A reviewer that can also fix the problem will fix it, and
 then the review is of its own work; read-only keeps the two apart by construction, not by instruction.
 
-**The coordinator verifies; it does not trust.** Every report ends with an attestation table: the
+**The overlord verifies; it does not trust.** Every report ends with an attestation table: the
 claim, one rerunnable read-only command that would prove it, and the expected result. The overlord
 re-runs those commands (a cheap verifier persona does it) before treating a claim as true. A claim
 with no check is labelled unverified. This catches the report that says "done" and is missing the
@@ -70,6 +70,34 @@ attestation and secret-handling slip is appended to a drift log with a kind labe
 scorecard generated from it and a sample of reports, asks "was routing right, were gates respected,
 did the spirit hold", and changes the rules, prompts and personas accordingly. The log is data, not
 prose, so reviews can count.
+
+## Architecture
+
+[`kit/ARCHITECTURE.md`](kit/ARCHITECTURE.md) is the design document: the components, the roles and
+who may write what, how a permission decision flows at runtime, where state lives, the governor loop
+and how verification works. It takes about fifteen minutes and needs nothing installed.
+
+## Repository map
+
+The documents, in reading order:
+
+- [`README.md`](README.md): this page, why it is built the way it is.
+- [`START-HERE.md`](START-HERE.md): the only install document.
+- [`kit/SETUP.md`](kit/SETUP.md): the guided first session Claude follows when you say "set me up".
+- [`kit/WALKTHROUGH.md`](kit/WALKTHROUGH.md): your first hour, what to do later, how to turn it off.
+- [`kit/ARCHITECTURE.md`](kit/ARCHITECTURE.md): components, roles, gates, state and the loop.
+- [`kit/INTEGRATIONS.md`](kit/INTEGRATIONS.md): what I have pointed it at, and how an idea becomes a service.
+- [`kit/EXAMPLE-INCIDENT.md`](kit/EXAMPLE-INCIDENT.md): a reconstructed three-day outage, start to finish.
+- [`kit/README.md`](kit/README.md): the reference, with every term once, the gates and what is in the box.
+- [`kit/SECURITY.md`](kit/SECURITY.md): the trust model and how to report a problem.
+- [`kit/CHANGELOG.md`](kit/CHANGELOG.md): what changed in each version.
+
+The rest of the top level:
+
+- [`CLAUDE.md`](CLAUDE.md): points a Claude session opened on this folder at `kit/SETUP.md`.
+- [`LICENSE`](LICENSE): MIT.
+- [`kit/`](kit/): the plugin (`kit/plugin/`), the repo template you copy (`kit/template/`), the
+  settings drop-in (`kit/dropin/`) and the optional mod (`kit/mods/`).
 
 ## What you can build on it
 
@@ -130,12 +158,12 @@ with my taps listed. You do not need any of those primitives to start.
   Report the reason verbatim, log it as a `classifier-deny`, and never reach the same effect through a
   script or another tool.
 - **My deployment runs things that are not in this kit yet.** There are three: a role guard that boxes a
-  read-only coordinator session into an exact allowlist of commands, argument by argument; a strategist
-  process that is the single writer of status, so no other role edits it; and persistent coordinator and
+  read-only overlord session into an exact allowlist of commands, argument by argument; a strategist
+  process that is the single writer of status, so no other role edits it; and persistent overlord and
   strategist seats that stay open for a day instead of starting per task. I held them back on purpose.
-  The first live probes showed the guard too tight (the coordinator could not even reply to the session
-  of the human it was working for), and I ship a design here only after it has run live for a while. Until
-  then the overlord in your session does that work itself.
+  The first live probes showed the guard too tight (the guarded overlord could not even reply to the
+  session of the human it was working for), and I ship a design here only after it has run live for a while. Until
+  then the overlord in your session plays those roles itself.
 
 
 ## What it missed
@@ -150,7 +178,7 @@ in a log, not incidents; one event can produce several.
 | Harness safety classifier denied a command | ~20 | The agent runtime has its own classifier above the hooks. Its denials were logged as a separate kind, because they show where the framework's briefs ask for things the platform will not grant. |
 | Design-review gate waived | ~12 | Each had a stated reason. The rate was the signal that the gate was scoped too widely. |
 | Model or budget discipline | ~7 (mis-routed tier, dispatch budget not matching the brief, a run killed at its cap) | A brief said one budget and the dispatch line carried another. Fix: read the brief's budget into the dispatch. |
-| Routing bypass or coordinator doing worker work | ~8 | The coordinator ran an investigation by hand because no persona fit; structural gaps, not judgment, and they produced new personas or briefs. |
+| Routing bypass or overlord doing worker work | ~8 | The overlord ran an investigation by hand because no persona fit; structural gaps, not judgment, and they produced new personas or briefs. |
 | Credential-handling slip (a value reached a local transcript or file) | 5 | The same class several times. Rules for credential-bearing files were added to every worker prompt and now exist as golden cases; the lesson was that a rule in one prompt is not a rule everywhere. |
 | Data-safety bug that passed review | 2 | Reviews had *read* the artifact (dry run, grep) and nothing had *run* it. Rule added: at least one attestation must exercise the thing. |
 | Reviewer rubber-stamping or asserting unearned status | a handful | The overlord compares verdicts to recorded state. |
@@ -176,8 +204,12 @@ my own homelab, so these describe one real use, not a benchmark.
   rsync and find variants, host-power verbs with redirects, and four heredoc shapes that hid a command.
   A security read of the release found one more hole in the fix itself (an apostrophe inside a
   double-quoted string could hide a reboot from the new pattern blanking) and it is pinned as a case.
-- **Persona replay:** 29 golden defects, each caught on its latest run; over a hundred replays on
-  record, including early runs that failed and drove prompt changes.
+- **Persona replay:** 23 golden defects, each caught on its latest run; over a hundred replays on
+  record, including early runs that failed and drove prompt changes. There were 29 at release 1.1.
+  Since then I removed two reviewer personas from my deployment, optimization and stakeholder-impact,
+  because both had become checklists the overseer applies itself in its report, and the six golden
+  cases written for the optimization reviewer were retired with it. The kit still ships all nine
+  personas.
 - **Drift log:** about 380 lines across six weeks, 37 distinct kinds.
 - **Dispatches:** about a hundred costed overseer runs after the cost ledger began, and about 140
   saved reports.
@@ -193,6 +225,10 @@ Open [`START-HERE.md`](START-HERE.md). Requirements: Claude Code on a paid Claud
 `bash`, `jq` and `git` (setup installs the last two on Windows), and `python3` for the board and the
 governor loop. Invoke with `/hatchery:overlord` and `/hatchery:overmind`. What is in each folder is
 listed in [`kit/README.md`](kit/README.md#whats-in-the-box).
+
+The optional `overlord-board` mod is not installed by setup and ships off: read
+[`kit/mods/overlord-board/README.md`](kit/mods/overlord-board/README.md), then load it for one session
+with `claude --plugin-dir kit/mods/overlord-board`.
 
 ## Status and limitations
 

@@ -1,0 +1,11 @@
+{
+  "title": "OVERLORD",
+  "order": ["priorities", "roles", "alarms", "review"],
+  "priorities_rows": 3,
+  "alarms": "auto",
+  "full_rows": 12,
+  "foot": ["asks", "open", "today", "tick"],
+  "stale_minutes": 60,
+  "show_subagents": true,
+  "board_file": "agents/state/board/board.json"
+}

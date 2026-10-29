@@ -63,8 +63,9 @@ H7) and the reviews are in `template/agents/ROUTING.md` §2, which is the file t
 lists are not repeated anywhere else.
 
 The lists are enforced by **hooks**: scripts that run before a command and refuse or ask on a pattern
-match, no judgment involved. **Security** is the one review that blocks a merge; the others are habits
-the overseer applies itself, with the persona as a second read. A **design review** is required only
+match, no judgment involved. **Security** is the one review that blocks a merge, and **on-call** is
+required first on any incident; the others are habits the overseer applies itself, with the persona as
+a second read. A **design review** is required only
 for a new service or spec, a decision-log amendment, or a change to the rules themselves.
 
 ## Habits worth stealing
@@ -99,8 +100,15 @@ Paths here and in `WALKTHROUGH.md` are relative to this `kit/` folder.
 - `WALKTHROUGH.md` — your first hour after setup, what to do later, and how to turn it all off.
 - `INTEGRATIONS.md` — what you can point it at, and how an idea becomes a running service.
 - `EXAMPLE-INCIDENT.md` — a reconstructed three-day outage, to show what the work looks like.
-- `mods/` — optional Claude Code mods, off by default: `overlord-board` draws the board above the
-  prompt. Read before loading.
+- `ARCHITECTURE.md` — the design in one read: components, roles, gates, state, the governor loop,
+  verification.
+- `SECURITY.md` — the trust model, how to report a problem, the known limits.
+- `CHANGELOG.md` — what changed in each version.
+- `mods/` — optional Claude Code mods, off by default: `overlord-board` is a base template that draws the
+  board above the prompt (priorities, who is working, alarms, a foot row) and adds a `/board` pane. Its layout
+  comes from an optional `agents/board-mod.json` that setup writes from a few questions (title, what goes first,
+  how many priority rows, alarms as one line or in full, the foot fields); with no file it draws sensible
+  defaults. Read before loading.
 
 ## What runs when
 

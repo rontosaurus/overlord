@@ -78,7 +78,7 @@ class BoardTests(unittest.TestCase):
         model, files = board.build(d, NOW)
         self.assertEqual([e["section"] for e in model["errors"]], ["overlord.md"])
         self.assertEqual(model["cards"], [])
-        self.assertIn("work board", board.render_html(model))
+        self.assertIn("overlord board", board.render_html(model))
 
     def test_template_state_is_clean(self):
         template = os.path.normpath(os.path.join(HERE, "..", ".."))
@@ -99,7 +99,7 @@ class BoardTests(unittest.TestCase):
         })
         model, files = board.build(d, NOW)
         self.assertEqual(model["asks_open"], 1)
-        self.assertEqual(model["triage"]["counts"], {"waiting": 2, "inflight": 2, "idle": 1})
+        self.assertEqual(model["triage"]["counts"], {"waiting": 2, "in_flight": 2, "idle": 1})
         self.assertEqual(model["strategist"]["next"]["now"], "ship the site")
         self.assertEqual(model["strategist"]["threads"][0]["tag"], "owner")
         self.assertEqual(len(model["strategist"]["priorities"]), 1)
